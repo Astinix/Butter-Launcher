@@ -6,6 +6,7 @@ import butterLogo from "../assets/butter-logo.png";
 import SettingsModal from "./SettingsModal";
 import settingsIcon from "../assets/settings.svg";
 import DragBar from "./DragBar";
+import { formatBytes } from "../utils/formatNum";
 
 const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const {
@@ -19,12 +20,6 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   } = useGameContext();
   const { username } = useUserContext();
   const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const installedSize = 0;
-  const totalSize = 2000; 
-
-  const installedSizeGB = (installedSize / 1024).toFixed(2); 
-  const totalSizeGB = (totalSize / 1024).toFixed(2);
 
   return (
     <div
@@ -69,22 +64,39 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
           {installing ? (
             <div>
               <div className="w-52 h-16 bg-white/10 rounded-lg shadow-inner flex flex-col justify-center p-4">
-                <div className="text-xs text-white font-semibold">Installing...</div>
-                <div className="flex items-center justify-between mt-1">
-                <div className="text-[10px] text-gray-300">{installProgress}%</div>
-                <div className="text-[10px] text-gray-300">
-                  {installedSizeGB} GB / {totalSizeGB} GB
+                <div className="text-xs text-white font-semibold">
+                  {installProgress.phase === "download"
+                    ? "Downloading..."
+                    : "Installing..."}
                 </div>
+                <div className="flex items-center justify-between mt-1">
+                  <div className="text-[10px] text-gray-300">
+                    {installProgress.percent}%
+                  </div>
+                  <div className="text-[10px] text-gray-300">
+                    {installProgress.phase === "download" ? (
+                      <>
+                        {formatBytes(installProgress.current)} /{" "}
+                        {formatBytes(installProgress.total)}
+                      </>
+                    ) : (
+                      <>
+                        {installProgress.current} / {installProgress.total}
+                      </>
+                    )}
+                  </div>
                 </div>
                 <div className="relative mt-2">
                   <div className="absolute inset-0 bg-white/20 rounded-full"></div>
                   <div
-                  className="h-1 bg-gradient-to-r from-[#3b82f6] to-[#60a5fa] rounded-full"
-                  style={{ width: `${installProgress}%`, transition: "width 0.3s ease" }}
-                />
-            </div>
-          </div>
-              
+                    className="h-1 bg-linear-to-r from-[#3b82f6] to-[#60a5fa] rounded-full"
+                    style={{
+                      width: `${installProgress.percent}%`,
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           ) : (
             <button
@@ -111,19 +123,22 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
           <div className="w-40 h-20 bg-white/10 rounded-lg shadow-inner flex flex-col justify-end p-2">
             <div className="text-xs text-white">Butter Launcher 1.0.0</div>
             <div className="text-[10px] text-gray-300">
-              The launcher is in Alpha phase, so it may have bugs; we are improving its functionality.
+              The launcher is in Alpha phase, so it may have bugs; we are
+              improving its functionality.
             </div>
           </div>
           <div className="w-40 h-20 bg-white/10 rounded-lg shadow-inner flex flex-col justify-end p-2">
             <div className="text-xs text-white">CONNECT AND CREATE</div>
             <div className="text-[10px] text-gray-300">
-              Join the largest non-premium Hytale community. Forge your own destiny.
+              Join the largest non-premium Hytale community. Forge your own
+              destiny.
             </div>
           </div>
           <div className="w-40 h-20 bg-white/10 rounded-lg shadow-inner flex flex-col justify-end p-2">
             <div className="text-xs text-white">FREE HYTALE ACCESS</div>
             <div className="text-[10px] text-gray-300">
-              Optimized performance and full access to the technical beta. No restrictions.
+              Optimized performance and full access to the technical beta. No
+              restrictions.
             </div>
           </div>
         </div>

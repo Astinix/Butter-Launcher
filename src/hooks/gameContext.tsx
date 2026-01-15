@@ -6,13 +6,20 @@ import {
   useCallback,
 } from "react";
 
+type InstallProgress = {
+  phase: "download" | "extract";
+  percent: number;
+  total: number;
+  current: number;
+};
+
 interface GameContextType {
   gameDir: string | null;
   isInstalled: boolean;
   gameVersion: string | null;
   latestVersion: string | null;
   installing: boolean;
-  installProgress: number;
+  installProgress: InstallProgress;
   launching: boolean;
   gameLaunched: boolean;
   installGame: () => void;
@@ -33,7 +40,12 @@ export const GameContextProvider = ({
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
 
   const [installing, setInstalling] = useState(false);
-  const [installProgress, setInstallProgress] = useState(0);
+  const [installProgress, setInstallProgress] = useState<InstallProgress>({
+    phase: "download",
+    percent: 0,
+    total: 0,
+    current: 0,
+  });
   const [launching, setLaunching] = useState(false);
   const [gameLaunched, setGameLaunched] = useState(false);
 
@@ -98,7 +110,13 @@ export const GameContextProvider = ({
   useEffect(() => {
     if (!window.config) return;
 
+    const bounceTimeout = 500;
+    let lastUpdateProgress: number;
     window.ipcRenderer.on("install-progress", (_, progress) => {
+      if (lastUpdateProgress && Date.now() - lastUpdateProgress < bounceTimeout)
+        return;
+      lastUpdateProgress = Date.now();
+
       setInstallProgress(progress);
     });
 
