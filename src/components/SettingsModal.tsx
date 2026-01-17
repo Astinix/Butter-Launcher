@@ -1,11 +1,24 @@
 import React from "react";
 import { FolderOpen } from "lucide-react";
+import { useGameContext } from "../hooks/gameContext";
 
 const SettingsModal: React.FC<{
   open: boolean;
   onClose: () => void;
   onLogout?: () => void;
 }> = ({ open, onClose, onLogout }) => {
+  const { gameDir } = useGameContext();
+
+  const handleOpenGameDir = async () => {
+    try {
+      const dir = gameDir ?? (await window.config.getDefaultGameDirectory());
+      await window.config.openFolder(dir);
+    } catch (e) {
+      console.error("Failed to open game directory", e);
+      alert("Failed to open game directory");
+    }
+  };
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -32,9 +45,12 @@ const SettingsModal: React.FC<{
           </div> */}
           <div>
             <label className="text-gray-200 text-sm font-semibold mb-1 block">
-              Game direcReacttory
+              Game Directory
             </label>
-            <button className="flex items-center gap-2 bg-[#23293a] border border-[#3b82f6] text-white px-4 py-2 rounded hover:bg-[#23293a]/80 transition">
+            <button
+              className="flex items-center gap-2 bg-[#23293a] border border-[#3b82f6] text-white px-4 py-2 rounded hover:bg-[#23293a]/80 transition"
+              onClick={handleOpenGameDir}
+            >
               Open
               <FolderOpen />
             </button>
@@ -44,7 +60,7 @@ const SettingsModal: React.FC<{
               Launcher Version
             </label>
             <div className="text-xs text-gray-400 font-mono">
-              release/2026.01.13-e6eb932
+              ButterLauncher_2026.01.16
             </div>
           </div>
           {/* <div>
@@ -76,7 +92,7 @@ const SettingsModal: React.FC<{
           <div className="pt-4 mt-2 border-t border-[#23293a] w-full text-center">
             <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Credits</span>
             <div className="mt-2 space-y-1">
-              <p className="text-xs text-gray-400">Crack: <span className="text-blue-400">Belleven</span></p>
+              <p className="text-xs text-gray-400">Online Fix: <span className="text-blue-400">vZyle</span></p>
               <p className="text-xs text-gray-400">System Launcher: <span className="text-blue-400">Fitzxel</span></p>
               <p className="text-xs text-gray-400">Design Launcher: <span className="text-blue-400">primeisonline</span></p>
             </div>

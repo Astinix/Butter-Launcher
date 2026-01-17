@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell, nativeImage } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -41,7 +41,34 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 
 let win: BrowserWindow | null = null;
 
+function resolveAppIcon() {
+  const iconFile =
+    process.platform === "win32" ? "icon.ico" : "icon.png";
+
+  const candidates = [
+    // Dev (repo)
+    path.join(process.env.APP_ROOT, "src", "assets", iconFile),
+    // If you later copy icons into dist/public
+    path.join(process.env.APP_ROOT, "dist", iconFile),
+    path.join(process.env.APP_ROOT, "public", iconFile),
+    // Vite public (set to public/ in dev, dist/ in prod)
+    path.join(process.env.VITE_PUBLIC, iconFile),
+  ];
+
+  const foundPath = candidates.find((p) => {
+    try {
+      return !!p && fs.existsSync(p);
+    } catch {
+      return false;
+    }
+  });
+
+  return foundPath ? nativeImage.createFromPath(foundPath) : undefined;
+}
+
 function createWindow() {
+  const icon = resolveAppIcon();
+
   win = new BrowserWindow({
     width: 1026,
     height: 640,
@@ -49,7 +76,7 @@ function createWindow() {
     titleBarStyle: "hidden",
     resizable: false,
     backgroundColor: "#00000000",
-    icon: `../src/assets/icon.ico`,
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
     },
@@ -105,6 +132,25 @@ ipcMain.handle("fetch:head", async (_, url, ...args) => {
 
 ipcMain.handle("get-default-game-directory", () => {
   return path.join(META_DIRECTORY, "Hytale");
+});
+
+ipcMain.handle("open-folder", async (_, folderPath: string) => {
+  try {
+    if (typeof folderPath !== "string" || !folderPath) {
+      throw new Error("Invalid folder path");
+    }
+
+    if (!fs.existsSync(folderPath)) {
+      fs.mkdirSync(folderPath, { recursive: true });
+    }
+
+    const result = await shell.openPath(folderPath);
+    // shell.openPath returns an empty string on success, otherwise an error message.
+    return { ok: result === "", error: result || null };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    return { ok: false, error: message };
+  }
 });
 
 ipcMain.handle(

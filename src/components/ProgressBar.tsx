@@ -8,7 +8,7 @@ interface Props {
 
 const PHASES: Record<string, string> = {
   "pwr-download": "Downloading...",
-  patching: "Patching...",
+  patching: "Extracting...",
   "fix-download": "Downloading Fix...",
   "fix-extract": "Patching Fix...",
   "jre-download": "Downloading JRE...",

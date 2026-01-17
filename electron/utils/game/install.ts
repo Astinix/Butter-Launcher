@@ -4,6 +4,7 @@ import path from "path";
 import { promisify } from "util";
 import stream from "stream";
 import { spawn } from "child_process";
+import readline from "node:readline";
 import extract from "extract-zip";
 import { installButler } from "./butler";
 import { installJRE } from "./jre";
@@ -82,24 +83,75 @@ const applyPWR = async (
   });
 
   return new Promise<string>((resolve, reject) => {
-    const butlerProcess = spawn(butlerPath, [
-      "apply",
-      "--staging-dir",
-      stagingDir,
-      pwrPath,
-      gameFinalDir,
-    ]).on("error", (error) => {
+    const butlerProcess = spawn(
+      butlerPath,
+      ["apply", "--json", "--staging-dir", stagingDir, pwrPath, gameFinalDir],
+      {
+        windowsHide: true,
+      },
+    ).on("error", (error) => {
       console.error("Butler process failed:", error);
       reject(error);
     });
-    butlerProcess.stdout.on("data", (data) => {
-      console.log(data.toString());
-    });
+
+    // Try to surface butler progress in the UI.
+    // Butler emits JSON lines when using --json.
+    if (butlerProcess.stdout) {
+      const rl = readline.createInterface({
+        input: butlerProcess.stdout,
+        crlfDelay: Infinity,
+      });
+      rl.on("line", (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        try {
+          const obj = JSON.parse(trimmed);
+
+          // Common shapes seen across butler commands.
+          // We handle a few variants defensively.
+          const type = typeof obj?.type === "string" ? obj.type : "";
+          const isProgress =
+            type.toLowerCase().includes("progress") ||
+            typeof obj?.percentage === "number" ||
+            typeof obj?.percent === "number";
+
+          if (!isProgress) return;
+
+          let percent: number | undefined;
+          if (typeof obj.percentage === "number") percent = obj.percentage;
+          else if (typeof obj.percent === "number") percent = obj.percent;
+          else if (typeof obj.progress === "number") percent = obj.progress;
+
+          if (typeof percent !== "number" || Number.isNaN(percent)) return;
+          // Normalize 0..1 to 0..100
+          if (percent > 0 && percent <= 1) percent = percent * 100;
+          percent = Math.max(0, Math.min(100, percent));
+
+          win.webContents.send("install-progress", {
+            phase: "patching",
+            percent: Math.round(percent),
+          });
+        } catch {
+          // Not JSON, ignore
+        }
+      });
+      butlerProcess.on("close", () => {
+        rl.close();
+      });
+    }
+
     butlerProcess.stderr.on("data", (data) => {
       console.error(data.toString());
     });
     butlerProcess.on("close", (code) => {
       console.log(`Butler process exited with code ${code}`);
+
+      // Force a final UI update so it doesn't stay stuck on "Downloading...".
+      win.webContents.send("install-progress", {
+        phase: "patching",
+        percent: 100,
+      });
+
       resolve(gameFinalDir);
     });
   });
@@ -111,7 +163,8 @@ const applyFix = async (
   win: BrowserWindow,
 ) => {
   try {
-    if (!version.hasFix || !version.fixURL) return;
+    // No fix available for this version is not an error.
+    if (!version.hasFix || !version.fixURL) return true;
 
     // download fix
     const fixPath = path.join(gameFinalDir, "fix.zip");
@@ -214,7 +267,7 @@ export const installGame = async (
       fs.unlinkSync(tempPWRPath);
 
       const applyFixResult = await applyFix(gameFinalDir, version, win);
-      if (!applyFixResult) return;
+      if (applyFixResult === false) return;
     }
     console.log("Game installed successfully");
 

@@ -27,5 +27,6 @@ interface Window {
   config: {
     OS: NodeJS.Platform;
     getDefaultGameDirectory: () => Promise<string>;
+    openFolder: (folderPath: string) => Promise<{ ok: boolean; error: string | null }>;
   };
 }

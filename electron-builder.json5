@@ -2,6 +2,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.butter.launcher",
+  "icon": "src/assets/icon.ico",
   "asar": true,
   "productName": "Butter Launcher",
   "copyright": "Copyright © 2026 Butter",
@@ -19,6 +20,7 @@
     "artifactName": "${name}-installer.${ext}"
   },
   "win": {
+    "icon": "src/assets/icon.ico",
     "target": [
       {
         "target": "nsis",

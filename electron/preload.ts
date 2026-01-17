@@ -31,5 +31,6 @@ contextBridge.exposeInMainWorld("ipcRenderer", {
 contextBridge.exposeInMainWorld("config", {
   getDefaultGameDirectory: () =>
     ipcRenderer.invoke("get-default-game-directory"),
+  openFolder: (folderPath: string) => ipcRenderer.invoke("open-folder", folderPath),
   OS: process.platform,
 });

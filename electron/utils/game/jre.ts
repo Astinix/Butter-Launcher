@@ -198,8 +198,76 @@ export const extractJRE = async (
       }
     }
 
-    const jrePath = path.join(jreDir, "bin", "java");
-    if (!fs.existsSync(jrePath)) throw new Error("Failed to extract JRE");
+    const os = process.platform;
+    const javaCandidates =
+      os === "win32" ? ["java.exe", "javaw.exe"] : ["java"];
+
+    const resolveJavaInRoot = () => {
+      const binDir = path.join(jreDir, "bin");
+      return javaCandidates
+        .map((name) => path.join(binDir, name))
+        .find((candidate) => fs.existsSync(candidate));
+    };
+
+    const findJavaRecursively = (rootDir: string, maxDepth = 6) => {
+      const queue: Array<{ dir: string; depth: number }> = [
+        { dir: rootDir, depth: 0 },
+      ];
+
+      while (queue.length) {
+        const { dir, depth } = queue.shift()!;
+        let entries: fs.Dirent[];
+        try {
+          entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name === "__MACOSX") continue;
+            if (depth < maxDepth) queue.push({ dir: fullPath, depth: depth + 1 });
+            continue;
+          }
+
+          if (!javaCandidates.includes(entry.name)) continue;
+          // Ensure it's under a 'bin' directory (typical JRE/JDK layout)
+          if (path.basename(path.dirname(fullPath)).toLowerCase() !== "bin") continue;
+          return fullPath;
+        }
+      }
+
+      return undefined;
+    };
+
+    const normalizeJreLayout = () => {
+      // Some archives ship as jdk-*/jre/bin/java(.exe) or similar nested structure.
+      // If we can locate a java binary under */bin/java(.exe), move that root up to jreDir.
+      const found = findJavaRecursively(jreDir);
+      if (!found) return;
+
+      const foundBinDir = path.dirname(found);
+      const foundRoot = path.dirname(foundBinDir);
+      if (path.resolve(foundRoot) === path.resolve(jreDir)) return;
+
+      const children = fs.readdirSync(foundRoot);
+      for (const child of children) {
+        const from = path.join(foundRoot, child);
+        const to = path.join(jreDir, child);
+        if (path.resolve(from) === path.resolve(to)) continue;
+        try {
+          if (fs.existsSync(to)) fs.rmSync(to, { recursive: true, force: true });
+          fs.renameSync(from, to);
+        } catch {
+          // If rename fails for any reason, fall back to leaving layout as-is.
+        }
+      }
+    };
+
+    normalizeJreLayout();
+    const jrePath = resolveJavaInRoot();
+    if (!jrePath) throw new Error("Failed to extract JRE");
 
     fs.unlinkSync(jreCompressedPath);
 

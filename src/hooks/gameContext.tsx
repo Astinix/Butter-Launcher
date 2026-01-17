@@ -100,11 +100,25 @@ export const GameContextProvider = ({
 
     const bounceTimeout = 200;
     let lastUpdateProgress: number;
-    window.ipcRenderer.on("install-progress", (_, progress) => {
-      if (lastUpdateProgress && Date.now() - lastUpdateProgress < bounceTimeout)
-        return;
-      lastUpdateProgress = Date.now();
+    const lastProgressRef = { current: null as InstallProgress | null };
 
+    window.ipcRenderer.on("install-progress", (_, progress: InstallProgress) => {
+      const now = Date.now();
+      const last = lastProgressRef.current;
+
+      // Never drop phase changes (this was causing the UI to get stuck on "Downloading...").
+      const phaseChanged = !last || last.phase !== progress.phase;
+      const allowThrough =
+        phaseChanged ||
+        progress.percent === -1 ||
+        progress.percent === 100 ||
+        !lastUpdateProgress ||
+        now - lastUpdateProgress >= bounceTimeout;
+
+      if (!allowThrough) return;
+
+      lastUpdateProgress = now;
+      lastProgressRef.current = progress;
       setInstallProgress(progress);
     });
     window.ipcRenderer.on("install-started", () => {
@@ -113,6 +127,22 @@ export const GameContextProvider = ({
     window.ipcRenderer.on("install-finished", (_, version) => {
       setInstalling(false);
       saveInstalledGameVersion(version);
+
+      // Update in-memory list so the UI immediately switches from "Install" to "Play".
+      setAvailableVersions((prev) => {
+        const next = prev.map((v) =>
+          v.build_index === version.build_index && v.type === version.type
+            ? { ...v, installed: true }
+            : v
+        );
+
+        const idx = next.findIndex(
+          (v) => v.build_index === version.build_index && v.type === version.type
+        );
+        if (idx !== -1) setSelectedVersion(idx);
+
+        return next;
+      });
     });
     window.ipcRenderer.on("install-error", (_, error) => {
       setInstalling(false);
@@ -133,28 +163,28 @@ export const GameContextProvider = ({
     if (!availableVersions.length) return;
     console.log("availableVersions", availableVersions);
 
-    try {
-      const buildIndex = localStorage.getItem("selectedVersionBuildIndex");
-      if (!buildIndex) throw new Error("No build index found");
-
-      const version = parseInt(buildIndex);
-      const found = availableVersions.findIndex(
-        (v) => v.build_index === version
-      );
-      if (found) setSelectedVersion(found);
-    } catch (e) {
-      setSelectedVersion(
-        availableVersions[availableVersions.length - 1].build_index
-      );
+    // Persist selection by build_index, but keep state as an array index.
+    const storedBuildIndex = localStorage.getItem("selectedVersionBuildIndex");
+    if (storedBuildIndex) {
+      const parsed = parseInt(storedBuildIndex, 10);
+      if (!Number.isNaN(parsed)) {
+        const found = availableVersions.findIndex((v) => v.build_index === parsed);
+        if (found !== -1) {
+          setSelectedVersion(found);
+          return;
+        }
+      }
     }
+
+    // Default to latest (last in the list)
+    setSelectedVersion(availableVersions.length - 1);
   }, [availableVersions]);
 
   useEffect(() => {
-    if (!selectedVersion) return;
-    localStorage.setItem(
-      "selectedVersionBuildIndex",
-      availableVersions[selectedVersion].build_index.toString()
-    );
+    if (!availableVersions.length) return;
+    const selected = availableVersions[selectedVersion];
+    if (!selected) return;
+    localStorage.setItem("selectedVersionBuildIndex", selected.build_index.toString());
   }, [selectedVersion, availableVersions]);
 
   return (
