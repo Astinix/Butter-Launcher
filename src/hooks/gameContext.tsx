@@ -66,10 +66,7 @@ export const GameContextProvider = ({
       if (!gameDir || !version.installed) return;
       setLaunching(true);
 
-      const customUUID = (localStorage.getItem("customUUID") || "").trim();
-      const uuidArg = customUUID.length ? customUUID : null;
-
-      window.ipcRenderer.send("launch-game", gameDir, version, username, uuidArg);
+      // Register listeners before sending the IPC message to avoid races.
       window.ipcRenderer.once("launched", () => {
         setLaunching(false);
         setGameLaunched(true);
@@ -78,10 +75,21 @@ export const GameContextProvider = ({
         setLaunching(false);
         setGameLaunched(false);
       });
-      window.ipcRenderer.once("launch-error", () => {
+      window.ipcRenderer.once("launch-error", (_, error?: string) => {
         setLaunching(false);
         setGameLaunched(false);
+        if (error) {
+          console.error("Launch error:", error);
+          alert(`Launch failed: ${error}`);
+        } else {
+          alert("Launch failed: Unknown error");
+        }
       });
+
+      const customUUID = (localStorage.getItem("customUUID") || "").trim();
+      const uuidArg = customUUID.length ? customUUID : null;
+
+      window.ipcRenderer.send("launch-game", gameDir, version, username, uuidArg);
     },
     [gameDir]
   );
@@ -105,12 +113,12 @@ export const GameContextProvider = ({
     // If there is no manifest yet (old installs), fall back to localStorage "installedVersions"
     // and treat the max build_index as the currently installed build.
     if (installedBuild == null && local.length) {
-      const maxLocal = Math.max(
-        ...local
-          .filter((v) => v.type === "release")
-          .map((v) => v.build_index)
-      );
-      if (Number.isFinite(maxLocal) && maxLocal > 0) installedBuild = maxLocal;
+      const localBuilds = local
+        .filter((v) => v.type === "release")
+        .map((v) => v.build_index)
+        .filter((n) => typeof n === "number" && Number.isFinite(n));
+      const maxLocal = localBuilds.length ? Math.max(...localBuilds) : null;
+      if (typeof maxLocal === "number" && maxLocal > 0) installedBuild = maxLocal;
     }
 
     remote = remote.map((version) => {
@@ -231,15 +239,18 @@ export const GameContextProvider = ({
     if (!availableVersions.length) return;
     console.log("availableVersions", availableVersions);
 
-    // Prefer selecting the currently installed build if one exists.
+    // If a build is installed but NOT the latest, default to the latest so users see "Update".
+    // (There is no version picker in the UI, so selecting the installed build would block updates.)
     const installedIdx = availableVersions.findIndex((v) => v.installed);
-    if (installedIdx !== -1) {
-      setSelectedVersion(installedIdx);
+    const latestIdx = Math.max(0, availableVersions.length - 1);
+    if (installedIdx !== -1 && installedIdx !== latestIdx) {
+      setSelectedVersion(latestIdx);
       return;
     }
 
-    // Otherwise default to latest (last in the list)
-    setSelectedVersion(availableVersions.length - 1);
+    // Otherwise prefer installed (which is also latest), or fall back to latest.
+    if (installedIdx !== -1) setSelectedVersion(installedIdx);
+    else setSelectedVersion(latestIdx);
   }, [availableVersions]);
 
   useEffect(() => {

@@ -22,8 +22,10 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const { username } = useUserContext();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  const installedVersion = availableVersions.find((v) => v.installed);
+
   const handleLaunch = () => {
-    if (!selectedVersion || !availableVersions[selectedVersion]) return;
+    if (selectedVersion == null || !availableVersions[selectedVersion]) return;
     if (!username) return;
 
     if (availableVersions[selectedVersion].installed) {
@@ -88,7 +90,9 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                 ? gameLaunched
                   ? "Running Game"
                   : "Play"
-                : "Install"}
+                : availableVersions.some((v) => v.installed)
+                  ? "Update"
+                  : "Install"}
             </button>
           )}
           <div className="text-xs text-gray-200 font-mono opacity-80 flex flex-col">
@@ -96,9 +100,9 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
               Latest Version:{" "}
               {availableVersions[availableVersions.length - 1]?.build_name}
             </span>
-            {availableVersions[selectedVersion]?.installed && (
+            {installedVersion && (
               <span>
-                Installed: {availableVersions[selectedVersion]?.build_name}
+                Installed: {installedVersion.build_name}
               </span>
             )}
           </div>

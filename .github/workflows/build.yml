@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  # 1. Preparar Release: Verifica versión y crea el Tag
+  # 1. Prepare release: verify version and create the tag
   prepare-release:
     runs-on: ubuntu-latest
     outputs:
@@ -27,10 +27,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag v${{ steps.get_version.outputs.VERSION }}
           git push origin v${{ steps.get_version.outputs.VERSION }}
-        # Si el tag ya existe (ej. re-run), no fallamos, simplemente continuamos al build
+          # If the tag already exists (e.g. re-run), don't fail; just continue to build
         continue-on-error: true
 
-  # 2. Compilar y Publicar para cada SO
+        # 2. Build and publish for each OS
   build:
     needs: prepare-release
     strategy:

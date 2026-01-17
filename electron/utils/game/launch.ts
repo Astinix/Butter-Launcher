@@ -1,7 +1,7 @@
 import { BrowserWindow } from "electron";
 import { checkGameInstallation } from "./check";
 import { join, dirname } from "path";
-import { exec } from "child_process";
+import { spawn } from "child_process";
 import fs from "fs";
 import { genUUID } from "./uuid";
 import { installGame } from "./install";
@@ -15,7 +15,9 @@ export const launchGame = async (
   customUUID: string | null = null
 ) => {
   if (retryCount > 1) {
-    console.error("Failed to launch game, maximum retry count reached");
+    const msg = "Failed to launch game (max retries reached)";
+    console.error(msg);
+    win.webContents.send("launch-error", msg);
     return;
   }
 
@@ -25,9 +27,9 @@ export const launchGame = async (
     const installResult = await installGame(baseDir, version, win);
     if (!installResult) {
       console.error("Game installation failed, retrying...");
-      launchGame(baseDir, version, username, win, retryCount + 1);
+      launchGame(baseDir, version, username, win, retryCount + 1, customUUID);
     } else {
-      launchGame(baseDir, version, username, win);
+      launchGame(baseDir, version, username, win, retryCount, customUUID);
     }
     return;
   }
@@ -61,20 +63,39 @@ export const launchGame = async (
     userDir,
     "--java-exec",
     jre,
-    "--auth-mode offline",
+    "--auth-mode",
+    "offline",
     "--uuid",
     uuidToUse ?? genUUID(username),
     "--name",
     username,
   ];
 
-  win.webContents.send("launched");
-  exec(`"${client}" ${args.join(" ")}`, (error) => {
-    if (error) {
+  try {
+    const child = spawn(client, args, {
+      windowsHide: true,
+      shell: false,
+      cwd: dirname(client),
+    });
+
+    child.on("spawn", () => {
+      win.webContents.send("launched");
+    });
+
+    child.on("error", (error) => {
       console.error(`Error launching game: ${error.message}`);
-      win.webContents.send("launch-error");
-      return;
-    }
-    win.webContents.send("launch-finished");
-  });
+      win.webContents.send("launch-error", error.message);
+    });
+
+    child.on("close", (code, signal) => {
+      if (code && code !== 0) {
+        console.error(`Game exited with code ${code}${signal ? ` (signal ${signal})` : ""}`);
+      }
+      win.webContents.send("launch-finished", { code, signal });
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    console.error(`Error launching game: ${msg}`);
+    win.webContents.send("launch-error", msg);
+  }
 };
