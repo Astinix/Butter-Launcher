@@ -13,7 +13,7 @@
   <a href="https://butterlauncher.tech">
     <img src="https://img.shields.io/badge/Website-butterlauncher.tech-facc15?style=flat-square&logo=google-chrome&logoColor=white" alt="Website">
   </a>
-  <a href="https://discord.gg/3eXr8qhQpq">
+  <a href="https://discord.gg/fZgjHwv5pA">
     <img src="https://img.shields.io/discord/1461711146238218310?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord">
   </a>
   <a href="https://github.com/vzylev/butter-launcher/releases">
@@ -42,7 +42,7 @@ Join the revolution! We are building the **largest open community** for Hytale p
 
 Whether you have questions, want to share feedback, or just want to find people to play with (regardless of your account status), you are welcome here.
 
-* **💬 Discord:** [Join our Server](https://discord.gg/3eXr8qhQpq) - *The hub for the biggest offline-mode community.*
+* **💬 Discord:** [Join our Server](https://discord.gg/fZgjHwv5pA) - *The hub for the biggest offline-mode community.*
 * **🌍 Website:** [butterlauncher.tech](https://butterlauncher.tech) - *Download, news, and docs.*
 
 ## 📥 Installation

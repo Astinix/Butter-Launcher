@@ -105,7 +105,7 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
         </div>
         <div className="flex flex-row gap-4">
           <div className="w-40 h-20 bg-white/10 rounded-lg shadow-inner flex flex-col justify-end p-2">
-            <div className="text-xs text-white">Butter Launcher 1.0.0</div>
+            <div className="text-xs text-white">Butter Launcher 1.0.1</div>
             <div className="text-[10px] text-gray-300">
               The launcher is in Alpha phase, so it may have bugs; we are
               improving its functionality.
