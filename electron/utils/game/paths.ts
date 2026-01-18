@@ -119,9 +119,78 @@ export const resolveExistingInstallDir = (baseDir: string, version: GameVersion)
 
 export const resolveClientPath = (installDir: string) => {
   const os = process.platform;
-  const clientName = os === "win32" ? "HytaleClient.exe" : "HytaleClient";
-  return path.join(installDir, "Client", clientName);
+  const clientDir = path.join(installDir, "Client");
+
+  if (os === "win32") {
+    return path.join(clientDir, "HytaleClient.exe");
+  }
+
+  // macOS builds commonly ship as an .app bundle. Our launcher wants an actual executable
+  // path for `spawn()`, so we resolve to Contents/MacOS/* when present.
+  if (os === "darwin") {
+    const direct = path.join(clientDir, "HytaleClient");
+    if (fs.existsSync(direct)) return direct;
+
+    const bundled = path.join(clientDir, "HytaleClient.app", "Contents", "MacOS", "HytaleClient");
+    if (fs.existsSync(bundled)) return bundled;
+
+    // Fallback: if the app name changes, pick the first *.app/Contents/MacOS/* binary.
+    // This is intentionally darwin-only to avoid surprising Windows/Linux behavior.
+    try {
+      if (fs.existsSync(clientDir)) {
+        const entries = fs.readdirSync(clientDir, { withFileTypes: true });
+        for (const ent of entries) {
+          if (!ent.isDirectory()) continue;
+          if (!ent.name.endsWith(".app")) continue;
+
+          const macOSDir = path.join(clientDir, ent.name, "Contents", "MacOS");
+          if (!fs.existsSync(macOSDir)) continue;
+
+          const files = fs
+            .readdirSync(macOSDir, { withFileTypes: true })
+            .filter((f) => f.isFile());
+
+          const preferred = files.find((f) => f.name === "HytaleClient") ?? files[0];
+          if (preferred) return path.join(macOSDir, preferred.name);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return bundled;
+  }
+
+  return path.join(clientDir, "HytaleClient");
 };
 
 export const resolveServerPath = (installDir: string) =>
-  path.join(installDir, "Server", "HytaleServer.jar");
+  {
+    const serverDir = path.join(installDir, "Server");
+    const expected = path.join(serverDir, "HytaleServer.jar");
+
+    // In a perfect world, filenames are stable and humans are consistent.
+    // In *this* world, macOS builds sometimes bring creative naming choices.
+    if (process.platform !== "darwin") return expected;
+    if (fs.existsSync(expected)) return expected;
+
+    // darwin-only fallback: pick a plausible server jar if the exact name doesn't exist.
+    // This keeps Windows/Linux behavior deterministic and boring (as it should be).
+    try {
+      if (!fs.existsSync(serverDir)) return expected;
+
+      const jars = fs
+        .readdirSync(serverDir, { withFileTypes: true })
+        .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".jar"))
+        .map((e) => e.name);
+
+      const preferred =
+        jars.find((n) => n.toLowerCase() === "hytaleserver.jar") ??
+        jars.find((n) => n.toLowerCase().includes("server")) ??
+        jars[0];
+
+      return preferred ? path.join(serverDir, preferred) : expected;
+    } catch {
+      return expected;
+    }
+  };

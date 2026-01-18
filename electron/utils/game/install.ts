@@ -338,6 +338,7 @@ export const installGame = async (
       // If the manifest says it's installed, but binaries are missing, fall back to patching.
       // This keeps us safe against partial installs.
       if (!client || !server) {
+        // Manifest says "installed", filesystem says "lol no".
         const butlerPath = await installButler();
         if (!butlerPath) throw new Error("Failed to install butler");
 

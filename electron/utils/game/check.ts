@@ -18,6 +18,9 @@ export function checkGameInstallation(gameDir: string, version: GameVersion) {
   const server = fs.existsSync(serverPath);
   const jre = fs.existsSync(jrePath);
 
+  // Yes, we *do* require the server JAR. Even on macOS. Yes, even if you personally
+  // never run it. Future-us will thank present-us when some feature silently depends on it.
+
   return {
     client: client ? clientPath : undefined,
     server: server ? serverPath : undefined,

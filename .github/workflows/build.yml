@@ -1,8 +1,9 @@
-name: Release Build
+name: Release Build (legacy - disabled)
 
 on:
-  push:
-    branches: [master]
+  # This workflow is intentionally disabled for automatic runs.
+  # The active mac-only pipeline lives in build-mac.yml.
+  workflow_dispatch:
 
 permissions:
   contents: write

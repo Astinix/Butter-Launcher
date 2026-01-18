@@ -5,6 +5,7 @@ import { spawn } from "child_process";
 import fs from "fs";
 import { genUUID } from "./uuid";
 import { installGame } from "./install";
+import { migrateLegacyChannelInstallIfNeeded, resolveExistingInstallDir } from "./paths";
 
 const ensureExecutable = (filePath: string) => {
   if (process.platform === "win32") return;
@@ -37,6 +38,10 @@ export const launchGame = async (
     win.webContents.send("launch-error", msg);
     return;
   }
+
+  // Keep path/layout resolution consistent with the installer.
+  migrateLegacyChannelInstallIfNeeded(baseDir, version.type);
+  const installDir = resolveExistingInstallDir(baseDir, version);
 
   let { client, server, jre } = checkGameInstallation(baseDir, version);
   if (!client || !server || !jre) {
@@ -83,7 +88,9 @@ export const launchGame = async (
 
   const args = [
     "--app-dir",
-    join(dirname(client), ".."),
+    installDir,
+    // Yes, we pass the install dir explicitly. No, we don't "guess" it from the executable
+    // path anymore. Bundles are cute until path math gets involved.
     "--user-dir",
     userDir,
     "--java-exec",
