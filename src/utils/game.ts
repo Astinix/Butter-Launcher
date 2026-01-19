@@ -149,6 +149,25 @@ const headPwrExists = async (
   }
 };
 
+const mapWithConcurrency = async <T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> => {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    for (let i = nextIndex++; i < items.length; i = nextIndex++) {
+      results[i] = await fn(items[i]);
+    }
+  };
+
+  const workers = Array.from({ length: Math.max(1, limit) }, () => worker());
+  await Promise.all(workers);
+  return results;
+};
+
 const probeBeyondLatest = async (
   versionType: VersionType,
   startFrom: number,
@@ -170,10 +189,20 @@ const probeFromBuild1 = async (
   maxScan: number,
 ): Promise<number[]> => {
   const found: number[] = [];
+  // Some platforms may not have early build indexes; don't abort just because build-1 is missing.
+  // Once we start finding builds, stop after a run of consecutive misses.
+  let consecutiveMisses = 0;
+  const stopAfterMisses = 12;
   for (let buildIndex = 1; buildIndex <= maxScan; buildIndex++) {
     const ok = await headPwrExists(versionType, buildIndex);
-    if (!ok) break;
-    found.push(buildIndex);
+    if (ok) {
+      found.push(buildIndex);
+      consecutiveMisses = 0;
+      continue;
+    }
+
+    consecutiveMisses++;
+    if (found.length && consecutiveMisses >= stopAfterMisses) break;
   }
   return found;
 };
@@ -256,11 +285,11 @@ export const getGameVersions = async (versionType: VersionType = "release") => {
   }
 
   // 3) HEAD-check each listed build to ensure it exists.
-  const existingListed: number[] = [];
-  for (const id of ids) {
+  const headResults = await mapWithConcurrency(ids, 10, async (id) => {
     const ok = await headPwrExists(versionType, id);
-    if (ok) existingListed.push(id);
-  }
+    return ok ? id : null;
+  });
+  const existingListed: number[] = headResults.filter((x): x is number => typeof x === "number");
 
   // 4) Probe latest+1, latest+2, ... until it stops being 200.
   // This catches new builds even when the versions list hasn't updated yet.
@@ -319,20 +348,25 @@ export const getGameVersions = async (versionType: VersionType = "release") => {
   versions.sort((a, b) => b.build_index - a.build_index);
 
   // get version fix (same behavior as before, but apply to all returned versions)
-  const fix: FixVersions = await window.ipcRenderer.invoke(
-    "fetch:json",
-    `${import.meta.env.VITE_DOWNLOADS_API_URL}/online/versions.json`
-  );
-  if (fix[os]) {
-    for (const v of versions) {
-      const versionFix = fix[os].find((fx) =>
-        semver.satisfies(v.build_index.toString(), fx.range)
-      );
-      if (versionFix) {
-        v.hasFix = true;
-        v.fixURL = `${import.meta.env.VITE_DOWNLOADS_API_URL}/online/${os}/${versionFix.path}`;
+  // Best-effort only: never block the versions list if this endpoint is down.
+  try {
+    const fix: FixVersions = await window.ipcRenderer.invoke(
+      "fetch:json",
+      `${import.meta.env.VITE_DOWNLOADS_API_URL}/online/versions.json`
+    );
+    if (fix[os]) {
+      for (const v of versions) {
+        const versionFix = fix[os].find((fx) =>
+          semver.satisfies(v.build_index.toString(), fx.range)
+        );
+        if (versionFix) {
+          v.hasFix = true;
+          v.fixURL = `${import.meta.env.VITE_DOWNLOADS_API_URL}/online/${os}/${versionFix.path}`;
+        }
       }
     }
+  } catch {
+    // ignore
   }
 
   return versions;

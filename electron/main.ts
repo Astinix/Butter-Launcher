@@ -341,13 +341,36 @@ ipcMain.handle(
   }
 );
 
-ipcMain.handle("fetch:json", async (_, url, ...args) => {
-  const response = await fetch(url, ...args);
+const fetchWithTimeout = async (
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number
+) => {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  try {
+    return await fetch(url, { ...(init ?? {}), signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+};
+
+ipcMain.handle("fetch:json", async (_, url, init?: RequestInit) => {
+  const response = await fetchWithTimeout(String(url), init, 15_000);
+  if (!response.ok) {
+    throw new Error(`fetch:json failed: ${response.status} ${response.statusText}`);
+  }
   return await response.json();
 });
-ipcMain.handle("fetch:head", async (_, url, ...args) => {
-  const response = await fetch(url, ...args);
-  return response.status;
+
+ipcMain.handle("fetch:head", async (_, url, init?: RequestInit) => {
+  try {
+    const response = await fetchWithTimeout(String(url), { ...(init ?? {}), method: "HEAD" }, 10_000);
+    return response.status;
+  } catch {
+    // Return a non-200 status on network failures/timeouts so renderer can fallback.
+    return 0;
+  }
 });
 
 ipcMain.handle("get-default-game-directory", () => {
