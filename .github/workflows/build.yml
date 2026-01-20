@@ -2,7 +2,7 @@ name: Release Build
 
 on:
   push:
-    branches: [master]
+    branches: [rpm-build-test]
 
 permissions:
   contents: write
