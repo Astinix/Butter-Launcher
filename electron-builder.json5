@@ -54,11 +54,13 @@
     "artifactName": "${name}.${ext}",
     "category": "Game",
     "desktop": {
-      "Name": "Butter Launcher",
-      "Comment": "Hytale launcher",
-      "Terminal": "false",
-      "Categories": "Game;",
-      "StartupWMClass": "Butter Launcher"
+      "entry": {
+        "Name": "Butter Launcher",
+        "Comment": "Hytale launcher",
+        "Terminal": "false",
+        "Categories": "Game;",
+        "StartupWMClass": "Butter Launcher"
+      }
     }
   },
   "flatpak": {
