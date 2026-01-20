@@ -58,7 +58,7 @@ Grab the latest executable for your operating system from our **[Releases Page](
 | OS | Format | Status |
 | :--- | :--- | :--- |
 | **Windows** | `.exe` / `.msi` | ✅ Stable |
-| **Linux** | `.AppImage` / `.flatpak` | 🚧 Experimental |
+| **Linux** | `.AppImage` / `.flatpak` | ✅ Stable |
 | **macOS** | `.dmg` | 🚧 Experimental |
 
 There is also a **[community-maintained AUR package](https://aur.archlinux.org/packages/butter-launcher-bin)** for Arch Linux.

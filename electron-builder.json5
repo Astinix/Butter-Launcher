@@ -40,6 +40,7 @@
   },
   "linux": {
     "icon": "src/assets/icon.png",
+    "executableName": "butter-launcher",
     "target": [
       "AppImage",
       "deb",
@@ -47,7 +48,14 @@
       "tar.gz"
     ],
     "artifactName": "${name}.${ext}",
-    "category": "Game"
+    "category": "Game",
+    "desktop": {
+      "Name": "Butter Launcher",
+      "Comment": "Hytale launcher",
+      "Terminal": "false",
+      "Categories": "Game;",
+      "StartupWMClass": "Butter Launcher"
+    }
   },
   "flatpak": {
     "runtimeVersion": "23.08",
