@@ -65,15 +65,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Flatpak (Linux)
+      - name: Install Linux Dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
+          sudo apt-get install -y flatpak flatpak-builder rpm
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak remotes --user
 
-      - name: Build & Publish (Electron Builder)
+      - name: Build & Publish (Linux)
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release -- --linux rpm
+
+      - name: Build & Publish (Windows/Mac)
+        if: runner.os != 'Linux'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run release

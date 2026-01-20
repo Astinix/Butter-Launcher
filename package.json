@@ -3,7 +3,8 @@
   "description": "The best Hytale Launcher",
   "author": "vZyle <vZyle@example.com>",
   "private": false,
-  "version": "1.0.6",
+  "version": "1.0.6-rpm-test",
+  "license": "MIT",
   "type": "module",
   "main": "dist-electron/main.js",
   "build": {

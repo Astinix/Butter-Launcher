@@ -9,6 +9,10 @@
   "directories": {
     "output": "release/${version}"
   },
+  "publish": {
+    "provider": "github",
+    "releaseType": "prerelease"
+  },
   "files": [
     "dist",
     "dist-electron"
