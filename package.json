@@ -2,7 +2,7 @@
   "name": "butter-launcher",
   "author": "vZyle <vZyle@example.com>",
   "private": false,
-  "version": "1.0.6-rpm-test-4",
+  "version": "1.0.6-rpm-test-5",
   "license": "MIT",
   "type": "module",
   "main": "dist-electron/main.js",
