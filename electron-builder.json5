@@ -56,9 +56,9 @@
     "desktop": {
       "entry": {
         "Name": "Butter Launcher",
-        "Comment": "Hytale launcher",
+        "Comment": "The best Hytale Launcher",
         "Terminal": "false",
-        "Categories": "Game;",
+        "Categories": "Game",
         "StartupWMClass": "Butter Launcher"
       }
     }
