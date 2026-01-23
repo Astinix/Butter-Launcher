@@ -27,12 +27,18 @@ type VersionDetails = {
   patch_note?: string;
 };
 
+type VersionDetailsList = {
+  windows: Record<string, VersionDetails>;
+  linux: Record<string, VersionDetails>;
+  darwin: Record<string, VersionDetails>;
+};
+
 type VersionDetailsRoot = {
   last_updated: string;
   latest_release_id: number;
   latest_prerelease_id: number;
-  versions: Record<string, VersionDetails>;
-  pre_releases: Record<string, VersionDetails>;
+  versions: VersionDetailsList;
+  pre_releases: VersionDetailsList;
 };
 
 type InstallProgress = {

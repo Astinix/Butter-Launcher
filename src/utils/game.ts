@@ -5,44 +5,13 @@ const VERSION_DETAILS_META_KEY = "versionDetailsMeta:v1";
 
 const useSystemOS = () => {
   if (window.config.OS === "win32") return "windows";
-  if (window.config.OS === "linux") return "linux";
+  if (window.config.OS !== "darwin") return "linux";
   return window.config.OS;
 };
 
 const useSystemArch = (os: string) => {
-  // Hytale patch endpoints currently only provide darwin/arm64.
   if (os === "darwin") return "arm64";
   return "amd64";
-};
-
-export const getGameVersion = async (
-  versionType: VersionType = "release",
-  versionIndex: number = 1,
-) => {
-  if (versionIndex < 1) versionIndex = 1;
-
-  const os = useSystemOS();
-  const arch = useSystemArch(os);
-  const URL = `${BASE_URL}/${os}/${arch}/${versionType}/0/${versionIndex}.pwr`;
-
-  let version: GameVersion | null = null;
-
-  const pwrStatus = await window.ipcRenderer.invoke("fetch:head", URL);
-  if (pwrStatus !== 200) return null;
-
-  // get version details
-  const details: VersionDetailsRoot = await window.ipcRenderer.invoke(
-    "fetch:json",
-    `${import.meta.env.VITE_REQUEST_VERSIONS_DETAILS_URL}`,
-  );
-
-  version = {
-    url: URL,
-    type: versionType,
-    build_index: versionIndex,
-    build_name: details?.versions[versionIndex.toString()]?.name || "",
-  };
-  return version;
 };
 
 const buildPwrUrl = (
@@ -195,7 +164,9 @@ export const getGameVersions = async (versionType: VersionType = "release") => {
       : details.latest_prerelease_id;
 
   const namesMap =
-    versionType === "release" ? details.versions : details.pre_releases;
+    versionType === "release"
+      ? details.versions[useSystemOS()]
+      : details.pre_releases[useSystemOS()];
 
   // 2) Build candidate IDs from list.
   let ids = Object.keys(namesMap || {})
