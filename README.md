@@ -50,6 +50,8 @@ Whether you have questions, want to share feedback, or just want to find people 
 
 * **💬 Discord:** [Join our Server](https://discord.gg/fZgjHwv5pA) - *The hub for the biggest offline-mode community.*
 * **🌍 Website:** [butterlauncher.tech](https://butterlauncher.tech) - *Download, news, and docs.*
+* **📸 Instagran:** [Follow us](https://instagram.com/butterlauncher_official) - *Updates, and community highlights.*
+* **🎥 Youtube:** [Subscribe](https://www.youtube.com/channel/UC4zJcaj_T71lelFtay3zL5A) - *Tutorials.*
 
 ## 📥 Installation
 
