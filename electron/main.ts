@@ -25,7 +25,12 @@ import {
   setPlayingActivity,
 } from "./utils/discord";
 import { readInstallManifest } from "./utils/game/manifest";
-import { listInstalledVersions } from "./utils/game/installed";
+import {
+  listInstalledVersions,
+  deleteInstalledVersion,
+  InstalledBuildInfo,
+} from "./utils/game/installed";
+
 import {
   getLatestDir,
   getPreReleaseBuildDir,
@@ -475,6 +480,19 @@ ipcMain.handle(
 ipcMain.handle("list-installed-versions", (_, baseDir: string) => {
   return listInstalledVersions(baseDir);
 });
+
+ipcMain.handle(
+  "delete-installed-version",
+  (_, baseDir: string, info: InstalledBuildInfo) => {
+    try {
+      deleteInstalledVersion(baseDir, info);
+      return { success: true };
+    } catch (e) {
+      logger.error("Failed to delete version", e);
+      return { success: false, error: String(e) };
+    }
+  },
+);
 
 ipcMain.on("install-game", (e, gameDir: string, version: GameVersion) => {
   if (!fs.existsSync(gameDir)) {

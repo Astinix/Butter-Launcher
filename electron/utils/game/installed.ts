@@ -112,3 +112,28 @@ export const listInstalledVersions = (baseDir: string): InstalledBuildInfo[] => 
     return [];
   }
 };
+
+export const deleteInstalledVersion = (
+  baseDir: string,
+  info: InstalledBuildInfo,
+): void => {
+  let installDir: string;
+
+  if (info.isLatest) {
+    installDir = getLatestDir(baseDir);
+  } else if (info.type === "release") {
+    installDir = path.join(
+      getReleaseChannelDir(baseDir),
+      `build-${info.build_index}`,
+    );
+  } else {
+    installDir = path.join(
+      getPreReleaseChannelDir(baseDir),
+      `build-${info.build_index}`,
+    );
+  }
+
+  if (!fs.existsSync(installDir)) return;
+
+  fs.rmSync(installDir, { recursive: true, force: true });
+};
