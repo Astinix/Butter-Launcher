@@ -8,7 +8,7 @@ import settingsIcon from "../assets/settings.svg";
 import DiscordLogo from "../assets/discord.svg";
 import DragBar from "./DragBar";
 import ProgressBar from "./ProgressBar";
-import { IconChevronDown, IconX } from "@tabler/icons-react";
+import { IconChevronDown, IconX, IconTrash } from "@tabler/icons-react";
 import cn from "../utils/cn";
 import ConfirmModal from "./ConfirmModal";
 
@@ -64,19 +64,8 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
     null,
   );
 
-  const currentInstalledSorted = availableVersions
-    .filter((v) => v.installed)
-    .sort((a, b) => a.build_index - b.build_index);
-  const currentInstalledVersion =
-    currentInstalledSorted.length > 0
-      ? currentInstalledSorted[currentInstalledSorted.length - 1]
-      : undefined;
-
   const latestVersion =
     availableVersions.length > 0 ? availableVersions[0] : null;
-  const latestLabel = latestVersion
-    ? latestVersion.build_name?.trim() || `Build-${latestVersion.build_index}`
-    : "Checking...";
 
   const latestRelease =
     versionType === "release"
@@ -303,12 +292,15 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
           title={versionsOpen ? "Hide versions" : "Show versions"}
         >
           <div className="flex flex-col text-left">
-            <div className="text-sm font-extrabold tracking-wide text-white">
-              Versions
+            <div className="text-sm font-semibold tracking-wide text-white">
+              Version:&nbsp;
+              {selected ? selectedLabel : "Select a version"}
             </div>
-            <div className="text-[10px] text-gray-200/80 font-mono">
+            <div className="text-[10px] text-gray-100 font-mono">
               {versionType === "release" ? "Release" : "Pre-release"}
-              {selected ? ` • ${selectedLabel}` : ""}
+              {selected &&
+                selected.build_index === latestVersion?.build_index &&
+                " (Latest)"}
             </div>
           </div>
           <IconChevronDown
@@ -322,12 +314,11 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 
         <div
           className={cn(
-            "mt-2 max-h-0 opacity-0 -translate-y-1 pointer-events-none rounded-xl border border-white/10 bg-black/45 backdrop-blur-md shadow-xl overflow-hidden transition-all duration-300",
-            versionsOpen &&
-              "max-h-[220px] opacity-100 translate-y-0 animate-popIn animate-softGlow pointer-events-auto",
+            "mt-2 opacity-0 -translate-y-1 pointer-events-none rounded-xl border border-white/10 bg-black/45 backdrop-blur-md shadow-xl overflow-hidden transition-all",
+            versionsOpen && "pointer-events-auto opacity-100 translate-y-0",
           )}
         >
-          <div className="p-3">
+          <div className="h-56 p-3 flex flex-col">
             <div className="flex gap-1 mb-3 bg-white/5 rounded-lg p-1">
               <button
                 type="button"
@@ -359,32 +350,25 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
               </button>
             </div>
 
-            <label className="block text-[11px] text-gray-200/80 mb-1">
+            <label className="text-[11px] text-gray-200/80 mb-1">
               Select build
             </label>
-            <div
-              className="max-h-[220px] overflow-y-auto pr-2"
-              style={{
-                scrollbarWidth: "thin",
-                scrollbarColor: "rgba(59, 130, 246, 0.7) rgba(31, 32, 35, 0.5)",
-              }}
-            >
+            <div className="flex-1 overflow-y-auto pr-2">
               {availableVersions.length === 0 ? (
                 <div className="text-gray-400 text-xs p-2">Loading...</div>
               ) : (
                 availableVersions.map((v, idx) => {
                   const name = v.build_name?.trim() || `Build-${v.build_index}`;
-                  const suffix = v.isLatest && v.type !== "pre-release" ? " • latest" : "";
+                  const suffix =
+                    v.isLatest && v.type !== "pre-release" ? " • Latest" : "";
                   const isSelected = selectedVersion === idx;
 
                   return (
                     <div
                       key={`${v.type}:${v.build_index}`}
                       className={cn(
-                        "flex items-center justify-between p-2 rounded-md mb-1 cursor-pointer transition",
-                        isSelected
-                          ? "bg-blue-600/40 text-white"
-                          : "text-gray-200 hover:text-white hover:bg-white/10",
+                        "flex items-center justify-between p-2 rounded-md mb-1 cursor-pointer text-gray-200 hover:text-white hover:bg-white/10 transition",
+                        isSelected && "bg-blue-600/40 text-white",
                       )}
                     >
                       <span
@@ -392,7 +376,7 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                         onClick={() => {
                           restoreUpdatePrompt();
                           setSelectedVersion(idx);
-                          setVersionsOpen((v) => !v)
+                          setVersionsOpen((v) => !v);
                         }}
                       >
                         {name}
@@ -402,14 +386,14 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                       {v.installed && (
                         <button
                           type="button"
-                          className="ml-2 text-xs text-red-400 hover:text-red-300 cursor-pointer"
+                          className="ml-2 text-xs text-gray-200 hover:text-red-400 cursor-pointer"
                           onClick={(e) => {
                             e.stopPropagation();
                             void deleteVersion(v);
                           }}
                           title={`Delete ${name}`}
                         >
-                          Delete
+                          <IconTrash size={16} />
                         </button>
                       )}
                     </div>
@@ -473,94 +457,85 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
         onClose={() => setSettingsOpen(false)}
         onLogout={onLogout}
       />
-      <div className="w-full bg-black/60 backdrop-blur-md p-6 flex flex-row items-end justify-between gap-6">
-        <div className="flex flex-col gap-3">
-          {installing || patchingOnline ? (
-            <div className="w-52 h-16 p-4 bg-white/10 rounded-lg shadow-inner flex items-center">
-              <ProgressBar
-                progress={installing ? installProgress : patchProgress}
-              />
-            </div>
-          ) : (
-            <div className="flex flex-row items-center gap-2">
+      <div className="w-full px-6 py-4 bg-black/60 backdrop-blur-md flex flex-row items-center justify-between gap-6">
+        {installing || patchingOnline ? (
+          <div className="w-52 h-16 p-4 bg-white/10 rounded-lg shadow-inner flex items-center">
+            <ProgressBar
+              progress={installing ? installProgress : patchProgress}
+            />
+          </div>
+        ) : (
+          <div className="flex flex-row items-center gap-2">
+            <button
+              className="min-w-52 bg-linear-to-r from-[#3b82f6] to-[#60a5fa] text-white text-xl font-bold px-12 py-3 rounded-lg shadow-lg hover:scale-105 transition disabled:opacity-50"
+              onClick={needsFixClient ? fixClient : handleLaunch}
+              disabled={launching || gameLaunched}
+              title={
+                needsFixClient ? "Restore the unpatched client" : undefined
+              }
+            >
+              {needsFixClient
+                ? "Fix Client"
+                : availableVersions[selectedVersion]?.installed
+                  ? gameLaunched
+                    ? "Running Game"
+                    : "Play"
+                  : showUpdate
+                    ? "Update"
+                    : "Install"}
+            </button>
+
+            {showUpdate && (
               <button
-                className="min-w-52 bg-linear-to-r from-[#3b82f6] to-[#60a5fa] text-white text-xl font-bold px-12 py-3 rounded-lg shadow-lg hover:scale-105 transition disabled:opacity-50"
-                onClick={needsFixClient ? fixClient : handleLaunch}
+                type="button"
+                className="w-10 h-10 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center"
+                title="Do not update for now"
+                onClick={() => dismissUpdateForNow()}
+              >
+                X
+              </button>
+            )}
+
+            {patchAvailable && !needsFixClient ? (
+              <button
+                type="button"
+                className={cn(
+                  "min-w-[140px] h-[52px] rounded-lg px-4 text-sm font-bold shadow-lg transition disabled:opacity-50 bg-linear-to-r from-[#2563eb] to-[#60a5fa] text-white hover:scale-105",
+                  onlinePatchEnabled &&
+                    "bg-white/10 hover:bg-white/20 text-white",
+                )}
                 disabled={launching || gameLaunched}
+                onClick={() => {
+                  // If enabled but outdated, re-run enable to download/apply the new patch.
+                  if (onlinePatchEnabled && patchOutdated) {
+                    startOnlinePatch();
+                    return;
+                  }
+
+                  if (onlinePatchEnabled) {
+                    disableOnlinePatch();
+                    return;
+                  }
+
+                  setPatchConfirmOpen(true);
+                }}
                 title={
-                  needsFixClient ? "Restore the unpatched client" : undefined
+                  onlinePatchEnabled
+                    ? patchOutdated
+                      ? "Update online patch"
+                      : "Disable online patch"
+                    : "Online Patch"
                 }
               >
-                {needsFixClient
-                  ? "Fix Client"
-                  : availableVersions[selectedVersion]?.installed
-                    ? gameLaunched
-                      ? "Running Game"
-                      : "Play"
-                    : showUpdate
-                      ? "Update"
-                      : "Install"}
+                {onlinePatchEnabled
+                  ? patchOutdated
+                    ? "Update Patch"
+                    : "Disable Patch"
+                  : "Online Patch"}
               </button>
-
-              {showUpdate && (
-                <button
-                  type="button"
-                  className="w-10 h-10 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center"
-                  title="Do not update for now"
-                  onClick={() => dismissUpdateForNow()}
-                >
-                  X
-                </button>
-              )}
-
-              {patchAvailable && !needsFixClient ? (
-                <button
-                  type="button"
-                  className={cn(
-                    "min-w-[140px] h-[52px] rounded-lg px-4 text-sm font-bold shadow-lg transition disabled:opacity-50 bg-linear-to-r from-[#2563eb] to-[#60a5fa] text-white hover:scale-105",
-                    onlinePatchEnabled &&
-                      "bg-white/10 hover:bg-white/20 text-white",
-                  )}
-                  disabled={launching || gameLaunched}
-                  onClick={() => {
-                    // If enabled but outdated, re-run enable to download/apply the new patch.
-                    if (onlinePatchEnabled && patchOutdated) {
-                      startOnlinePatch();
-                      return;
-                    }
-
-                    if (onlinePatchEnabled) {
-                      disableOnlinePatch();
-                      return;
-                    }
-
-                    setPatchConfirmOpen(true);
-                  }}
-                  title={
-                    onlinePatchEnabled
-                      ? patchOutdated
-                        ? "Update online patch"
-                        : "Disable online patch"
-                      : "Online Patch"
-                  }
-                >
-                  {onlinePatchEnabled
-                    ? patchOutdated
-                      ? "Update Patch"
-                      : "Disable Patch"
-                    : "Online Patch"}
-                </button>
-              ) : null}
-            </div>
-          )}
-          <div className="text-xs text-gray-200 font-mono opacity-80 flex flex-col">
-            <span>Latest Version: {latestLabel}</span>
-            <span>
-              Current Version: {currentInstalledVersion?.build_name || "None"}
-            </span>
-            {selectedLabel ? <span>Selected: {selectedLabel}</span> : null}
+            ) : null}
           </div>
-        </div>
+        )}
         <div className="flex flex-row gap-4">
           {(newsItems.length
             ? newsItems

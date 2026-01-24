@@ -15,6 +15,14 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
       setError("Enter your nickname");
       return;
     }
+    if (nick.length < 3) {
+      setError("Nickname must be at least 3 characters long");
+      return;
+    }
+    if (nick.length > 16) {
+      setError("Nickname must be at most 16 characters long");
+      return;
+    }
     setError("");
     onLogin(nick.trim());
   };
@@ -39,12 +47,16 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
             select-none
             absolute"
         />
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <p className="mb-3 text-gray-400 text-sm text-center">
+          Enter your nickname to continue
+        </p>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-2">
           <input
             type="text"
             placeholder="Nickname"
             value={nick}
+            minLength={3}
+            maxLength={16}
             onChange={(e) => setNick(e.target.value)}
             className="
               w-full h-11 px-4
@@ -56,9 +68,10 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
               focus:ring-2 focus:ring-[#4a90e2]
             "
           />
-
           {error && <span className="text-red-400 text-xs">{error}</span>}
-
+          <p className="px-2 text-gray-400 text-xs">
+            {nick.length}/16 characters
+          </p>
           <button
             type="submit"
             className="
@@ -73,11 +86,6 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
             ENTER
           </button>
         </form>
-
-        <p className="text-gray-400 text-sm mt-4">
-          Enter your nickname to continue.
-        </p>
-
         <div className="absolute bottom-6 left-10 text-xs text-gray-500">
           {`${window.config.BUILD_DATE} V${window.config.VERSION}`}
         </div>

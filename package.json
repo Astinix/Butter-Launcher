@@ -4,7 +4,7 @@
   "author": "vZyle <vZyle@example.com>",
   "private": false,
   "license": "MIT",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "build_date": "",
   "type": "module",
   "main": "dist-electron/main.js",
