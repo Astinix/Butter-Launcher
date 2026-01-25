@@ -7,7 +7,8 @@ import { genUUID } from "./uuid";
 import { installGame } from "./install";
 import { logger } from "../logger";
 import { getOnlinePatchState } from "./onlinePatch";
-import { generateTokens } from "./tokens";
+import { fetchAuthTokens } from "./auth";
+import { resolveExistingInstallDir } from "./paths";
 
 const ensureExecutable = (filePath: string) => {
   if (process.platform === "win32") return;
@@ -57,8 +58,10 @@ export const launchGame = async (
     `Starting launch process for ${version.type} ${version.build_name} for user ${username}`,
   );
 
+  const needsServer = process.platform !== "darwin";
+
   let { client, server, jre } = checkGameInstallation(baseDir, version);
-  if (!client || !server || !jre) {
+  if (!client || !jre || (needsServer && !server)) {
     logger.info("Game components missing, starting installation:", {
       client,
       server,
@@ -74,7 +77,7 @@ export const launchGame = async (
 
     // Re-check after install.
     ({ client, server, jre } = checkGameInstallation(baseDir, version));
-    if (!client || !server || !jre) {
+    if (!client || !jre || (needsServer && !server)) {
       const msg = "Game installation incomplete (missing files after install)";
       logger.error(msg, { client, server, jre });
       win.webContents.send("launch-error", msg);
@@ -121,7 +124,7 @@ export const launchGame = async (
 
   const args = [
     "--app-dir",
-    join(dirname(client), ".."),
+    resolveExistingInstallDir(baseDir, version),
     "--user-dir",
     userDir,
     "--java-exec",
@@ -132,26 +135,43 @@ export const launchGame = async (
     username,
   ];
 
-  if (
-    process.platform !== "win32" &&
-    getOnlinePatchState(baseDir, version).enabled
-  ) {
+  const patchEnabled = getOnlinePatchState(baseDir, version).enabled;
+  const hasProperPatchFlag = typeof version.proper_patch === "boolean";
+
+  // New behavior:
+  // - If online patch is enabled and proper_patch === false => authenticated + tokens
+  // - If online patch is enabled and proper_patch === true  => offline
+  // Compatibility fallback (when proper_patch is missing):
+  // - Legacy behavior was Linux/macOS authenticated when patched.
+  const useAuthenticated =
+    patchEnabled &&
+    ((hasProperPatchFlag && version.proper_patch === false) ||
+      (!hasProperPatchFlag && process.platform !== "win32"));
+  // Nothing says "fun" like having two auth modes and three operating systems ;w;
+
+  if (useAuthenticated) {
     logger.info(
-      "Linux or macOS detected with online patch enabled, using auth tokens",
+      "Online patch enabled with proper_patch=false (or legacy non-windows), using authenticated auth",
     );
     args.push("--auth-mode", "authenticated");
 
-    const authTokens = generateTokens(username, finalUuid);
-    if (!authTokens) {
-      logger.error("Auth tokens not found, cannot launch game");
-      win.webContents.send("launch-error", "Auth tokens not found");
+    try {
+      const authTokens = await fetchAuthTokens(username, finalUuid);
+      args.push("--identity-token", authTokens.identityToken);
+      args.push("--session-token", authTokens.sessionToken);
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : "Authentication failed (unknown error)";
+      logger.error("Authentication failed:", e);
+      win.webContents.send("launch-error", msg);
       return;
     }
-    args.push("--identity-token", authTokens.identityToken);
-    args.push("--session-token", authTokens.sessionToken);
+    // If this fails, it's not you. It's… probably DNS.
   } else {
     logger.info(
-      "Windows detected or disabled online patch, using offline auth",
+      patchEnabled
+        ? "Online patch enabled with proper_patch=true, using offline auth"
+        : "Online patch disabled, using offline auth",
     );
     args.push("--auth-mode", "offline");
   }

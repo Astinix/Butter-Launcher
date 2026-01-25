@@ -15,6 +15,11 @@ const pipeline = promisify(stream.pipeline);
 
 const FETCH_TIMEOUT_MS = 45_000;
 
+type AggregateProgress = {
+  total?: number;
+  current: number;
+};
+
 const PATCH_ROOT_DIRNAME = ".butter-online-patch";
 const PATCH_STATE_FILENAME = "state.json";
 
@@ -28,6 +33,27 @@ const withCacheBuster = (url: string, cacheKey: string) => {
   } catch {
     const sep = url.includes("?") ? "&" : "?";
     return `${url}${sep}cb=${encodeURIComponent(cacheKey)}`;
+  }
+};
+
+const headContentLength = async (url: string): Promise<number | undefined> => {
+  // because servers always send content length right
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      signal: controller.signal,
+    });
+    if (!res.ok) return undefined;
+    const contentLength = res.headers.get("content-length");
+    if (!contentLength) return undefined;
+    const n = parseInt(contentLength, 10);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
   }
 };
 
@@ -157,7 +183,9 @@ const downloadFileWithProgress = async (
     | "online-patch-progress"
     | "online-unpatch-progress",
   phase: "online-patch" | "online-unpatch" = "online-patch",
+  aggregate?: AggregateProgress,
 ) => {
+  // one progress bar to rule them all
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -190,21 +218,32 @@ const downloadFileWithProgress = async (
   }
 
   const contentLength = response.headers.get("content-length");
-  const totalLength = contentLength ? parseInt(contentLength, 10) : 0;
+  const fileTotalLength = contentLength ? parseInt(contentLength, 10) : 0;
+  const totalLength =
+    typeof aggregate?.total === "number" && aggregate.total > 0
+      ? aggregate.total
+      : fileTotalLength;
   let downloadedLength = 0;
 
   const progressStream = new stream.PassThrough();
   progressStream.on("data", (chunk) => {
     downloadedLength += chunk.length;
 
+    if (aggregate) aggregate.current += chunk.length;
+
     const percent =
-      totalLength > 0 ? Math.round((downloadedLength / totalLength) * 100) : -1;
+      totalLength > 0
+        ? Math.round(
+            ((aggregate ? aggregate.current : downloadedLength) / totalLength) *
+              100,
+          )
+        : -1;
 
     win.webContents.send(progressChannel, {
       phase,
       percent,
       total: totalLength > 0 ? totalLength : undefined,
-      current: downloadedLength,
+      current: aggregate ? aggregate.current : downloadedLength,
     });
   });
 
@@ -213,21 +252,28 @@ const downloadFileWithProgress = async (
     phase,
     percent: totalLength > 0 ? 0 : -1,
     total: totalLength > 0 ? totalLength : undefined,
-    current: 0,
+    current: aggregate ? aggregate.current : 0,
   });
 
   await pipeline(
-    // @ts-ignore
+    // @ts-expect-error - Node stream/web stream type mismatch
     stream.Readable.fromWeb(response.body),
     progressStream,
     fs.createWriteStream(outPath),
   );
 
+  const finalPercent =
+    totalLength > 0
+      ? Math.round(
+          ((aggregate ? aggregate.current : downloadedLength) / totalLength) *
+            100,
+        )
+      : -1;
   win.webContents.send(progressChannel, {
     phase,
-    percent: 100,
+    percent: aggregate ? finalPercent : 100,
     total: totalLength > 0 ? totalLength : undefined,
-    current: downloadedLength,
+    current: aggregate ? aggregate.current : downloadedLength,
   });
 };
 
@@ -265,8 +311,7 @@ export const getClientPatchState = (
     input.on("data", (chunk) => currentHash.update(chunk));
     // Synchronous wrapper: getOnlinePatchState is sync, so keep it cheap if hash can't be computed.
     // If needed, health-check uses the async sha256File path.
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
-    input.on("error", () => {});
+    input.on("error", () => undefined);
     // Not awaiting; treat as unknown.
     clientIsPatched = false;
   } catch {
@@ -496,6 +541,7 @@ export const enableClientPatch = async (
   progressChannel:
     | "install-progress"
     | "online-patch-progress" = "online-patch-progress",
+  aggregate?: AggregateProgress,
 ): Promise<"enabled" | "already-enabled" | "skipped"> => {
   const url = version.patch_url;
   const expectedHash = version.patch_hash;
@@ -553,6 +599,7 @@ export const enableClientPatch = async (
       win,
       progressChannel,
       "online-patch",
+      aggregate,
     );
 
     const downloadedHash = await sha256File(paths.tempDownloadPath);
@@ -609,6 +656,7 @@ export const enableClientPatch = async (
         win,
         progressChannel,
         "online-patch",
+        aggregate,
       );
 
       const downloadedHash = await sha256File(tempOriginal);
@@ -866,7 +914,7 @@ export const getServerPatchState = (
     enabled = true;
     writePatchState(statePath, {
       enabled: true,
-      patch_hash: state?.patch_hash,
+      patch_hash: version.patch_hash ?? state?.patch_hash,
       patch_url: version.server_url,
       original_url: version.unserver_url ?? state?.original_url,
       patch_note: state?.patch_note,
@@ -932,7 +980,7 @@ export const getServerPatchHealth = async (
     serverIsPatched = true;
     writePatchState(statePath, {
       enabled: true,
-      patch_hash: state?.patch_hash,
+      patch_hash: version.patch_hash ?? state?.patch_hash,
       patch_url: version.server_url,
       original_url: version.unserver_url ?? state?.original_url,
       patch_note: state?.patch_note,
@@ -1035,7 +1083,9 @@ export const enableServerPatch = async (
   progressChannel:
     | "install-progress"
     | "online-patch-progress" = "online-patch-progress",
+  aggregate?: AggregateProgress,
 ): Promise<"enabled" | "already-enabled" | "skipped"> => {
+  // server patch now gets to be special too
   const url = version.server_url;
   const originalUrl = version.unserver_url;
   if (!url || !originalUrl) return "skipped";
@@ -1048,20 +1098,44 @@ export const enableServerPatch = async (
 
   const existing = readPatchState(paths.statePath);
 
+  const expectedKey = version.patch_hash ? normalizeHash(version.patch_hash) : undefined;
+
   if (existing?.enabled) {
-    return "already-enabled";
+    // we trust state until we absolutely do not
+    // Only treat it as already-enabled when the expected key matches (if present).
+    if (!expectedKey) return "already-enabled";
+    if (existing.patch_hash && normalizeHash(existing.patch_hash) === expectedKey)
+      return "already-enabled";
+    // Otherwise, proceed to re-apply and refresh cached patched server.
   }
 
-  // Download patched server if not cached
-  let patchedOk = fs.existsSync(paths.patchedPath);
+  // Download patched server if not cached (or stale)
+  let patchedOk = false;
+  if (fs.existsSync(paths.patchedPath)) {
+    if (!expectedKey) {
+      patchedOk = true;
+    } else if (!existing?.patch_hash) {
+      patchedOk = false;
+    } else {
+      patchedOk = normalizeHash(existing.patch_hash) === expectedKey;
+    }
+  }
 
   if (!patchedOk) {
+    // cache invalidation is my favorite hobby
+    try {
+      if (fs.existsSync(paths.patchedPath)) fs.unlinkSync(paths.patchedPath);
+    } catch {
+      // ignore
+    }
+
     await downloadFileWithProgress(
-      withCacheBuster(url, `server-patch-${Date.now()}`),
+      withCacheBuster(url, `server-patch-${expectedKey ?? Date.now().toString()}`),
       paths.tempDownloadPath,
       win,
       progressChannel,
       "online-patch",
+      aggregate,
     );
 
     moveReplace(paths.tempDownloadPath, paths.patchedPath);
@@ -1089,6 +1163,7 @@ export const enableServerPatch = async (
 
   writePatchState(paths.statePath, {
     enabled: true,
+    patch_hash: version.patch_hash,
     patch_url: url,
     original_url: originalUrl,
     updatedAt: Date.now(),
@@ -1115,7 +1190,9 @@ export const disableServerPatch = async (
 
   const existing = readPatchState(paths.statePath);
 
-  if (!existing?.enabled) return "already-disabled";
+  // Allow disable if state is missing but we have evidence of patch storage.
+  const looksPatched = !!existing?.enabled || fs.existsSync(paths.patchedPath);
+  if (!looksPatched) return "already-disabled";
 
   if (!fs.existsSync(paths.originalPath)) {
     // Need to download the original server
@@ -1156,6 +1233,7 @@ export const disableServerPatch = async (
 
   writePatchState(paths.statePath, {
     enabled: false,
+    patch_hash: version.patch_hash,
     patch_url: url,
     original_url: originalUrl,
     updatedAt: Date.now(),
@@ -1176,8 +1254,15 @@ export const checkServerPatchNeeded = async (
   const { statePath } = getPatchPaths(serverPath);
   const state = readPatchState(statePath);
 
+  const expectedKey = version.patch_hash ? normalizeHash(version.patch_hash) : undefined;
+
   // If state says enabled and patch_url matches, consider up-to-date
-  if (state?.enabled && state.patch_url === version.server_url) {
+  if (
+    state?.enabled &&
+    state.patch_url === version.server_url &&
+    (!expectedKey ||
+      (state.patch_hash && normalizeHash(state.patch_hash) === expectedKey))
+  ) {
     return "up-to-date";
   }
 
@@ -1194,17 +1279,105 @@ export const enableOnlinePatch = async (
     | "install-progress"
     | "online-patch-progress" = "online-patch-progress",
 ): Promise<"enabled" | "already-enabled" | "skipped"> => {
+  // two downloads one progress bar no regrets
+  // Preflight downloads so UI shows combined size when downloading both.
+  const wantsServer = !!(version.server_url && version.unserver_url);
+
+  const preflightClientNeedsDownload = async (): Promise<boolean> => {
+    const url = version.patch_url;
+    const expectedHash = version.patch_hash;
+    if (!url || !expectedHash) return false;
+
+    const clientPath = getClientPath(gameDir, version);
+    if (!fs.existsSync(clientPath)) return false;
+
+    const paths = getPatchPaths(clientPath);
+    const existing = readPatchState(paths.statePath);
+    if (!fs.existsSync(paths.patchedPath)) return true;
+
+    if (
+      existing?.patch_hash &&
+      normalizeHash(existing.patch_hash) !== normalizeHash(expectedHash)
+    ) {
+      return true;
+    }
+
+    try {
+      const cachedHash = await sha256File(paths.patchedPath);
+      return normalizeHash(cachedHash) !== normalizeHash(expectedHash);
+    } catch {
+      return true;
+    }
+  };
+
+  const preflightServerNeedsDownload = async (): Promise<boolean> => {
+    if (!wantsServer) return false;
+
+    const serverPath = getServerPath(gameDir, version);
+    if (!fs.existsSync(serverPath)) return false;
+
+    const paths = getPatchPaths(serverPath);
+    const existing = readPatchState(paths.statePath);
+    if (!fs.existsSync(paths.patchedPath)) return true;
+
+    const expectedKey = version.patch_hash
+      ? normalizeHash(version.patch_hash)
+      : undefined;
+
+    // If we have a client patch hash, require server state to match it.
+    if (expectedKey) {
+      if (!existing?.patch_hash) return true;
+      if (normalizeHash(existing.patch_hash) !== expectedKey) return true;
+    }
+
+    return false;
+  };
+
+  const needsClientDownload = await preflightClientNeedsDownload();
+  const needsServerDownload = await preflightServerNeedsDownload();
+
+  let aggregate: AggregateProgress | undefined;
+  if (needsClientDownload || needsServerDownload) {
+    // asking the internet how big the internet is
+    const sizes = await Promise.all([
+      needsClientDownload && version.patch_url
+        ? headContentLength(withCacheBuster(version.patch_url, "patch-head"))
+        : Promise.resolve(undefined),
+      needsServerDownload && version.server_url
+        ? headContentLength(withCacheBuster(version.server_url, "server-head"))
+        : Promise.resolve(undefined),
+    ]);
+
+    const required: Array<number | undefined> = [];
+    if (needsClientDownload) required.push(sizes[0]);
+    if (needsServerDownload) required.push(sizes[1]);
+
+    let allKnown = true;
+    let total = 0;
+    for (const n of required) {
+      if (typeof n !== "number" || !(n > 0)) {
+        allKnown = false;
+        continue;
+      }
+      total += n;
+    }
+
+    // if sizes are unknown we pretend everything is fine
+    aggregate = { total: allKnown && total > 0 ? total : undefined, current: 0 };
+  }
+
   // First, patch the client
   const clientResult = await enableClientPatch(
     gameDir,
     version,
     win,
     progressChannel,
+    aggregate,
   );
 
   // Then, patch the server if available
-  if (version.server_url && version.unserver_url) {
-    await enableServerPatch(gameDir, version, win, progressChannel);
+  if (wantsServer) {
+    await enableServerPatch(gameDir, version, win, progressChannel, aggregate);
   }
 
   return clientResult;

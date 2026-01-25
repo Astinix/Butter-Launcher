@@ -22,6 +22,9 @@ interface GameContextType {
   restoreUpdatePrompt: () => void;
   installing: boolean;
   installProgress: InstallProgress;
+  installingVersion: GameVersion | null;
+  cancelBuildDownload: () => void;
+  cancelingBuildDownload: boolean;
   patchingOnline: boolean;
   patchProgress: InstallProgress;
   pendingOnlinePatch: boolean;
@@ -58,6 +61,10 @@ export const GameContextProvider = ({
   const [updateAvailable, setUpdateAvailable] = useState(false);
 
   const [installing, setInstalling] = useState(false);
+  const [installingVersion, setInstallingVersion] = useState<GameVersion | null>(
+    null,
+  );
+  const [cancelingBuildDownload, setCancelingBuildDownload] = useState(false);
   const [installProgress, setInstallProgress] = useState<InstallProgress>({
     phase: "download",
     percent: 0,
@@ -131,11 +138,27 @@ export const GameContextProvider = ({
   const installGame = useCallback(
     (version: GameVersion) => {
       if (!gameDir) return;
-
+      // store the version so cancel can actually target something
+      // because the universe hates stateless ui
+      setInstallingVersion(version);
+      setCancelingBuildDownload(false);
       window.ipcRenderer.send("install-game", gameDir, version);
     },
     [gameDir],
   );
+
+  const cancelBuildDownload = useCallback(() => {
+    if (!gameDir) return;
+    if (!installingVersion) return;
+
+    // we only show this button during pwr download but lets be paranoid
+    setCancelingBuildDownload(true);
+    window.ipcRenderer.send(
+      "cancel-build-download",
+      gameDir,
+      installingVersion,
+    );
+  }, [gameDir, installingVersion]);
 
   const launchGame = useCallback(
     (version: GameVersion, username: string) => {
@@ -375,9 +398,12 @@ export const GameContextProvider = ({
     });
     window.ipcRenderer.on("install-started", () => {
       setInstalling(true);
+      setCancelingBuildDownload(false);
     });
     window.ipcRenderer.on("install-finished", (_, version) => {
       setInstalling(false);
+      setInstallingVersion(null);
+      setCancelingBuildDownload(false);
 
       // Immediately reflect install completion in UI (Play should appear right away).
       try {
@@ -443,7 +469,21 @@ export const GameContextProvider = ({
     });
     window.ipcRenderer.on("install-error", (_, error) => {
       setInstalling(false);
+      setInstallingVersion(null);
+      setCancelingBuildDownload(false);
       alert(`Installation failed: ${error}`);
+    });
+
+    window.ipcRenderer.on("install-cancelled", () => {
+      // user cancelled the download so we gracefully stop pretending we were busy
+      setInstalling(false);
+      setInstallingVersion(null);
+      setCancelingBuildDownload(false);
+    });
+
+    window.ipcRenderer.on("install-cancel-not-possible", () => {
+      // nothing to cancel so we just reset the button state
+      setCancelingBuildDownload(false);
     });
 
     (async () => {
@@ -486,6 +526,9 @@ export const GameContextProvider = ({
         restoreUpdatePrompt,
         installing,
         installProgress,
+        installingVersion,
+        cancelBuildDownload,
+        cancelingBuildDownload,
         patchingOnline,
         patchProgress,
         pendingOnlinePatch: false,

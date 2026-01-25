@@ -43,6 +43,8 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
     restoreUpdatePrompt,
     installing,
     installProgress,
+    cancelBuildDownload,
+    cancelingBuildDownload,
     patchingOnline,
     patchProgress,
     installGame,
@@ -459,10 +461,25 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
       />
       <div className="w-full px-6 py-4 bg-black/60 backdrop-blur-md flex flex-row items-center justify-between gap-6">
         {installing || patchingOnline ? (
-          <div className="w-52 h-16 p-4 bg-white/10 rounded-lg shadow-inner flex items-center">
-            <ProgressBar
-              progress={installing ? installProgress : patchProgress}
-            />
+          <div className="w-52 h-16 p-4 bg-white/10 rounded-lg shadow-inner flex items-center gap-2">
+            <ProgressBar progress={installing ? installProgress : patchProgress} />
+
+            {installing &&
+            !patchingOnline &&
+            installProgress?.phase === "pwr-download" ? (
+              <button
+                type="button"
+                className="w-5 h-5 flex items-center justify-center text-white/90 hover:text-white bg-white/0 hover:bg-white/10 rounded disabled:opacity-50"
+                title="Cancel download"
+                disabled={cancelingBuildDownload}
+                onClick={() => {
+                  // because sometimes you realize you did not want build 472 at all
+                  cancelBuildDownload();
+                }}
+              >
+                <IconX size={14} />
+              </button>
+            ) : null}
           </div>
         ) : (
           <div className="flex flex-row items-center gap-2">

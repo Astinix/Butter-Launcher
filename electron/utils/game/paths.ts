@@ -117,9 +117,103 @@ export const resolveExistingInstallDir = (baseDir: string, version: GameVersion)
   return resolveInstallDir(baseDir, version);
 };
 
+const findFirstFileNamed = (
+  rootDir: string,
+  fileName: string,
+  opts?: { maxDepth?: number; maxEntries?: number },
+): string | null => {
+  const maxDepth = opts?.maxDepth ?? 6;
+  const maxEntries = opts?.maxEntries ?? 5000;
+  const q: Array<{ dir: string; depth: number }> = [{ dir: rootDir, depth: 0 }];
+  let seen = 0;
+
+  while (q.length) {
+    const cur = q.shift()!;
+    if (cur.depth > maxDepth) continue;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(cur.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const e of entries) {
+      seen++;
+      if (seen > maxEntries) return null;
+
+      const p = path.join(cur.dir, e.name);
+      if (e.isFile() && e.name === fileName) return p;
+      if (e.isDirectory()) q.push({ dir: p, depth: cur.depth + 1 });
+    }
+  }
+
+  return null;
+};
+
+const resolveMacAppClientBinary = (clientDir: string): string | null => {
+  // Common expected bundle name
+  const direct = path.join(clientDir, "HytaleClient.app");
+  const candidates: string[] = [];
+  try {
+    if (fs.existsSync(direct)) candidates.push(direct);
+  } catch {
+    // ignore
+  }
+
+  // Fallback: any *.app in Client
+  try {
+    const entries = fs.readdirSync(clientDir, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      if (!e.name.toLowerCase().endsWith(".app")) continue;
+      if (/hytaleclient/i.test(e.name)) candidates.push(path.join(clientDir, e.name));
+    }
+    // If nothing matched by name, accept the first .app
+    if (!candidates.length) {
+      for (const e of entries) {
+        if (e.isDirectory() && e.name.toLowerCase().endsWith(".app")) {
+          candidates.push(path.join(clientDir, e.name));
+          break;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  for (const appPath of candidates) {
+    const macOsDir = path.join(appPath, "Contents", "MacOS");
+    const directBin = path.join(macOsDir, "HytaleClient");
+    try {
+      if (fs.existsSync(directBin)) return directBin;
+    } catch {
+      // ignore
+    }
+
+    // Fallback: first file in Contents/MacOS
+    try {
+      const macEntries = fs.readdirSync(macOsDir, { withFileTypes: true });
+      for (const e of macEntries) {
+        if (e.isFile()) return path.join(macOsDir, e.name);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
+};
+
 export const resolveClientPath = (installDir: string) => {
   const clientDir = path.join(installDir, "Client");
   const isWin = process.platform === "win32";
+
+  // macOS builds ship as an .app bundle
+  if (process.platform === "darwin") {
+    const macBin = resolveMacAppClientBinary(clientDir);
+    if (macBin) return macBin;
+  }
 
   const candidates = isWin
     ? ["HytaleClient.exe", "HytaleClient"]
@@ -146,5 +240,39 @@ export const resolveClientPath = (installDir: string) => {
   return path.join(clientDir, isWin ? "HytaleClient.exe" : "HytaleClient");
 };
 
-export const resolveServerPath = (installDir: string) =>
-  path.join(installDir, "Server", "HytaleServer.jar");
+export const resolveServerPath = (installDir: string) => {
+  const primary = path.join(installDir, "Server", "HytaleServer.jar");
+  try {
+    if (fs.existsSync(primary)) return primary;
+  } catch {
+    // ignore
+  }
+
+  // Some macOS bundles ship the server jar inside the app resources
+  if (process.platform === "darwin") {
+    const clientDir = path.join(installDir, "Client");
+    const appDir = path.join(clientDir, "HytaleClient.app");
+    const candidates = [
+      path.join(clientDir, "Server", "HytaleServer.jar"),
+      path.join(clientDir, "HytaleServer.jar"),
+      path.join(appDir, "Contents", "Resources", "Server", "HytaleServer.jar"),
+      path.join(appDir, "Contents", "Resources", "HytaleServer.jar"),
+    ];
+
+    for (const p of candidates) {
+      try {
+        if (fs.existsSync(p)) return p;
+      } catch {
+        // ignore
+      }
+    }
+
+    const found = findFirstFileNamed(installDir, "HytaleServer.jar", {
+      maxDepth: 7,
+      maxEntries: 8000,
+    });
+    if (found) return found;
+  }
+
+  return primary;
+};

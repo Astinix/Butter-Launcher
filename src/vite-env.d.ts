@@ -16,6 +16,13 @@ type GameVersion = {
   patch_hash?: string;
   original_url?: string;
   patch_note?: string;
+  /**
+   * When the online patch is enabled:
+   * - proper_patch === true  => launch stays offline
+   * - proper_patch === false => launch uses authenticated mode + tokens
+   * If missing, launcher falls back to legacy behavior (Linux/macOS authenticated).
+   */
+  proper_patch?: boolean;
   installed?: boolean;
   server_url?: string;
   unserver_url?: string;
@@ -27,11 +34,14 @@ type VersionDetails = {
   hash?: string;
   patch_note?: string;
   original?: string;
+  proper_patch?: boolean;
 };
 
 type VersionManifest = {
   server_url?: string;
   unserver_url?: string;
+  server?: string;
+  unserver?: string;
   windows: VersionDetails;
   linux: VersionDetails;
   darwin: VersionDetails;

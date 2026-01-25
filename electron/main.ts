@@ -15,7 +15,7 @@ import { autoUpdater } from "electron-updater";
 import { META_DIRECTORY } from "./utils/const";
 import { logger } from "./utils/logger";
 
-import { installGame } from "./utils/game/install";
+import { cancelBuildDownload, installGame } from "./utils/game/install";
 import { checkGameInstallation } from "./utils/game/check";
 import { launchGame } from "./utils/game/launch";
 import {
@@ -108,6 +108,12 @@ let backgroundTimeout: NodeJS.Timeout | null = null;
 let isBackgroundMode = false;
 let networkBlockerInstalled = false;
 let isGameRunning = false;
+
+// Prevent overlapping online patch operations (double-click spam / race conditions).
+const onlinePatchInFlight = new Set<string>();
+
+const onlinePatchKey = (gameDir: string, version: GameVersion) =>
+  `${gameDir}::${version.type}::${version.build_index}`;
 
 const destroyTray = () => {
   if (!tray) return;
@@ -506,6 +512,21 @@ ipcMain.on("install-game", (e, gameDir: string, version: GameVersion) => {
 });
 
 ipcMain.on(
+  "cancel-build-download",
+  (e, gameDir: string, version: GameVersion) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return;
+
+    // cancel only the pwr download because everything else is apparently sacred
+    const ok = cancelBuildDownload(gameDir, version);
+    if (!ok) {
+      // no spammy alerts here just a quiet no
+      win.webContents.send("install-cancel-not-possible");
+    }
+  },
+);
+
+ipcMain.on(
   "launch-game",
   (
     e,
@@ -567,6 +588,22 @@ ipcMain.on(
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return;
 
+    const key = onlinePatchKey(gameDir, version);
+    if (onlinePatchInFlight.has(key)) {
+      win.webContents.send(
+        "online-patch-error",
+        "Patch operation already in progress. Please wait.",
+      );
+      return;
+    }
+    onlinePatchInFlight.add(key);
+
+    // Flip UI into progress state immediately (hash checks can take a moment).
+    win.webContents.send("online-patch-progress", {
+      phase: "online-patch",
+      percent: -1,
+    });
+
     try {
       const result = await enableOnlinePatch(
         gameDir,
@@ -578,6 +615,8 @@ ipcMain.on(
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       win.webContents.send("online-patch-error", msg);
+    } finally {
+      onlinePatchInFlight.delete(key);
     }
   },
 );
@@ -587,6 +626,21 @@ ipcMain.on(
   async (e, gameDir: string, version: GameVersion) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return;
+
+    const key = onlinePatchKey(gameDir, version);
+    if (onlinePatchInFlight.has(key)) {
+      win.webContents.send(
+        "online-unpatch-error",
+        "Patch operation already in progress. Please wait.",
+      );
+      return;
+    }
+    onlinePatchInFlight.add(key);
+
+    win.webContents.send("online-unpatch-progress", {
+      phase: "online-unpatch",
+      percent: -1,
+    });
 
     try {
       const result = await disableOnlinePatch(
@@ -599,6 +653,8 @@ ipcMain.on(
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       win.webContents.send("online-unpatch-error", msg);
+    } finally {
+      onlinePatchInFlight.delete(key);
     }
   },
 );
@@ -608,6 +664,21 @@ ipcMain.on(
   async (e, gameDir: string, version: GameVersion) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return;
+
+    const key = onlinePatchKey(gameDir, version);
+    if (onlinePatchInFlight.has(key)) {
+      win.webContents.send(
+        "online-unpatch-error",
+        "Patch operation already in progress. Please wait.",
+      );
+      return;
+    }
+    onlinePatchInFlight.add(key);
+
+    win.webContents.send("online-unpatch-progress", {
+      phase: "online-unpatch",
+      percent: -1,
+    });
 
     try {
       const result = await fixClientToUnpatched(
@@ -620,6 +691,8 @@ ipcMain.on(
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       win.webContents.send("online-unpatch-error", msg);
+    } finally {
+      onlinePatchInFlight.delete(key);
     }
   },
 );

@@ -40,7 +40,8 @@
     "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": true,
+    // Keep user worlds and launcher data on uninstall and during upgrades
+    "deleteAppDataOnUninstall": false,
     "allowElevation": true
   },
   "linux": {

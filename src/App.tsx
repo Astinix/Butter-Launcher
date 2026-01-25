@@ -10,8 +10,14 @@ export default function App() {
   const [fade, setFade] = useState(false);
 
   useEffect(() => {
+    let enableRPC = false;
+    try {
+      enableRPC = !!window.localStorage.getItem("enableRPC");
+    } catch {
+      enableRPC = false;
+    }
     window.ipcRenderer.send("ready", {
-      enableRPC: !!window.localStorage.getItem("enableRPC"),
+      enableRPC,
     });
 
     if (ready) {

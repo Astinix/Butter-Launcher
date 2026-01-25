@@ -21,6 +21,49 @@ import {
 
 const pipeline = promisify(stream.pipeline);
 
+// we track only the pwr download because users love cancel buttons
+// and because canceling patching would be too reasonable
+class UserCancelledError extends Error {
+  constructor() {
+    super("user_cancelled");
+    this.name = "UserCancelledError";
+  }
+}
+
+type PwrDownloadState = {
+  controller: AbortController;
+  tempPath: string;
+};
+
+const pwrDownloadsInFlight = new Map<string, PwrDownloadState>();
+
+const installKey = (gameDir: string, version: GameVersion) =>
+  `${gameDir}::${version.type}::${version.build_index}`;
+
+export const cancelBuildDownload = (
+  gameDir: string,
+  version: GameVersion,
+): boolean => {
+  const key = installKey(gameDir, version);
+  const st = pwrDownloadsInFlight.get(key);
+  if (!st) return false;
+
+  try {
+    st.controller.abort();
+  } catch {
+    // ignore
+  }
+
+  // best effort cleanup of partial file
+  try {
+    if (fs.existsSync(st.tempPath)) fs.unlinkSync(st.tempPath);
+  } catch {
+    // ignore
+  }
+
+  return true;
+};
+
 const ensureExecutable = (filePath: string) => {
   if (process.platform === "win32") return;
   try {
@@ -50,12 +93,17 @@ const downloadPWR = async (
   win: BrowserWindow,
 ) => {
   const tempPWRPath = path.join(gameDir, `temp_${version.build_index}.pwr`);
+  const key = installKey(gameDir, version);
+  const controller = new AbortController();
+
+  // yes this is global state and yes it will haunt us later
+  pwrDownloadsInFlight.set(key, { controller, tempPath: tempPWRPath });
 
   try {
     logger.info(
       `Starting PWR download for version ${version.build_name} from ${version.url}`,
     );
-    const response = await fetch(version.url);
+    const response = await fetch(version.url, { signal: controller.signal });
     if (!response.ok)
       throw new Error(`Failed to download: ${response.statusText}`);
     if (!response.body) throw new Error("No response body");
@@ -111,11 +159,26 @@ const downloadPWR = async (
 
     return tempPWRPath;
   } catch (error) {
+    // user asked to cancel so we pretend this was always supported
+    if (
+      controller.signal.aborted ||
+      (error && typeof error === "object" && (error as any).name === "AbortError")
+    ) {
+      try {
+        if (fs.existsSync(tempPWRPath)) fs.unlinkSync(tempPWRPath);
+      } catch {
+        // ignore
+      }
+      throw new UserCancelledError();
+    }
+
     logger.error(
       `Failed to download PWR for version ${version.build_name}:`,
       error,
     );
     return null;
+  } finally {
+    pwrDownloadsInFlight.delete(key);
   }
 };
 
@@ -343,6 +406,12 @@ export const installGame = async (
     win.webContents.send("install-finished", version);
     return true;
   } catch (error) {
+    if (error instanceof UserCancelledError) {
+      logger.info("Install cancelled by user");
+      win.webContents.send("install-cancelled");
+      return false;
+    }
+
     logger.error("Installation failed with error:", error);
     win.webContents.send(
       "install-error",
