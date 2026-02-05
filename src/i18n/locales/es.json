@@ -1,0 +1,49 @@
+{
+  "common": {
+    "play": "Jugar",
+    "settings": "Configuración",
+    "close": "Cerrar",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito"
+  },
+  "launcher": {
+    "title": "Butter Launcher",
+    "welcome": "Bienvenido a Butter Launcher",
+    "selectVersion": "Seleccionar Versión",
+    "username": "Nombre de usuario",
+    "enterUsername": "Ingresa tu nombre de usuario",
+    "playOffline": "Jugar Sin Conexión",
+    "playOnline": "Jugar En Línea"
+  },
+  "settings": {
+    "title": "Configuración",
+    "general": "General",
+    "language": "Idioma",
+    "selectLanguage": "Seleccionar Idioma",
+    "downloadDirectory": "Directorio de Descarga",
+    "changeDirectory": "Cambiar Directorio",
+    "appearance": "Apariencia",
+    "theme": "Tema",
+    "checkForUpdates": "Buscar Actualizaciones",
+    "about": "Acerca de"
+  },
+  "versions": {
+    "latest": "Última",
+    "prerelease": "Pre-lanzamiento",
+    "installed": "Instalado",
+    "notInstalled": "No Instalado",
+    "download": "Descargar",
+    "delete": "Eliminar",
+    "size": "Tamaño"
+  },
+  "errors": {
+    "downloadFailed": "Descarga fallida",
+    "invalidUsername": "Nombre de usuario inválido",
+    "noInternet": "Sin conexión a internet",
+    "gameNotFound": "Archivos del juego no encontrados"
+  }
+}

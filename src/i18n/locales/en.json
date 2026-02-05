@@ -1,0 +1,49 @@
+{
+  "common": {
+    "play": "Play",
+    "settings": "Settings",
+    "close": "Close",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success"
+  },
+  "launcher": {
+    "title": "Butter Launcher",
+    "welcome": "Welcome to Butter Launcher",
+    "selectVersion": "Select Version",
+    "username": "Username",
+    "enterUsername": "Enter your username",
+    "playOffline": "Play Offline",
+    "playOnline": "Play Online"
+  },
+  "settings": {
+    "title": "Settings",
+    "general": "General",
+    "language": "Language",
+    "selectLanguage": "Select Language",
+    "downloadDirectory": "Download Directory",
+    "changeDirectory": "Change Directory",
+    "appearance": "Appearance",
+    "theme": "Theme",
+    "checkForUpdates": "Check for Updates",
+    "about": "About"
+  },
+  "versions": {
+    "latest": "Latest",
+    "prerelease": "Pre-release",
+    "installed": "Installed",
+    "notInstalled": "Not Installed",
+    "download": "Download",
+    "delete": "Delete",
+    "size": "Size"
+  },
+  "errors": {
+    "downloadFailed": "Download failed",
+    "invalidUsername": "Invalid username",
+    "noInternet": "No internet connection",
+    "gameNotFound": "Game files not found"
+  }
+}
