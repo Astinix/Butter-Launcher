@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { IconFolderOpen } from "@tabler/icons-react";
 import { useGameContext } from "../hooks/gameContext";
 import cn from "../utils/cn";
+import { useLanguage } from "../hooks/useLanguage";
+import { LANGUAGES } from "../utils/languages";
+
 
 const SettingsModal: React.FC<{
   open: boolean;
@@ -12,7 +15,7 @@ const SettingsModal: React.FC<{
   const [customUUID, setCustomUUID] = useState<string>("");
   const [enableRPC, setEnableRPC] = useState<boolean>(false);
   const [changingDir, setChangingDir] = useState(false);
-
+  const { lang, changeLanguage, t } = useLanguage();
   const [closing, setClosing] = useState(false);
 
   const normalizedUUID = useMemo(() => {
@@ -279,7 +282,22 @@ const SettingsModal: React.FC<{
               </p>
             </div>
           </div>
-
+<div className="flex flex-col gap-2 mt-4">
+  <label className="text-[10px] text-gray-400 font-bold uppercase">
+    Language {LANGUAGES[lang as keyof typeof LANGUAGES].flag}
+  </label>
+  <select 
+    value={lang} 
+    onChange={(e) => changeLanguage(e.target.value as any)}
+    className="bg-[#1a1f2e] border border-[#2a3146] text-white rounded-lg p-2 outline-none"
+  >
+    {Object.entries(LANGUAGES).map(([code, info]) => (
+      <option key={code} value={code}>
+        {info.flag} {info.name}
+      </option>
+    ))}
+  </select>
+</div>
           <div className="flex flex-col gap-3">
             <div className="text-[11px] font-mono text-gray-400">
               {`${window.config.BUILD_DATE} V${window.config.VERSION}`}
@@ -287,9 +305,9 @@ const SettingsModal: React.FC<{
             <button
               className="px-4 py-2 rounded-lg font-semibold border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 transition disabled:opacity-50"
               disabled={checkingUpdates}
-              onClick={() => checkForUpdates("manual")}
-            >
-              {checkingUpdates ? "CHECKING..." : "CHECK FOR UPDATES"}
+               onClick={() => checkForUpdates("manual")}
+               >
+              {checkingUpdates ? t('searching_updates') : t('check_updates')}
             </button>
 
             {onLogout && (
