@@ -92,7 +92,6 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 
   const patchAvailable =
     !!selected &&
-    !!selected.installed &&
     !!selected.patch_url &&
     !!selected.patch_hash;
 
