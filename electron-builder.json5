@@ -15,7 +15,8 @@
   },
   "files": [
     "dist",
-    "dist-electron"
+    "dist-electron",
+    ".env"
   ],
   "mac": {
     "icon": "build/icon",
