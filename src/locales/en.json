@@ -30,6 +30,13 @@
     "clear": "Clear",
     "send": "Send"
   },
+  "supportTicket": {
+    "devAssistSoon": "A developer will assist you shortly.",
+    "invalidOrExpired": "Invalid or expired ticket.",
+    "collectLogsFailed": "Couldn't collect local logs.",
+    "connectFailed": "Couldn't connect to support.",
+    "copyFailed": "Couldn't copy automatically. Select the code and copy it manually."
+  },
   "login": {
     "accountTypePrompt": "Choose your account type",
     "premium": "Premium",

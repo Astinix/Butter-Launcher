@@ -2,6 +2,9 @@
 
 // Types: the polite fiction that everything is under control.
 
+// Build-time injected constant (see vite.config.ts). Empty string when not provided.
+declare const __LAUNCHER_SECRET_KEY__: string;
+
 declare namespace NodeJS {
   interface ProcessEnv {
     /**

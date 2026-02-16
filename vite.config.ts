@@ -16,6 +16,11 @@ export default defineConfig({
         vite: {
           define: {
             __filename: "import.meta.url",
+            // Build-time injection for releases (CI sets LAUNCHER_SECRET_KEY as an env var).
+            // NOTE: This value becomes part of the bundled JS and is not truly secret in distributed binaries.
+            __LAUNCHER_SECRET_KEY__: JSON.stringify(
+              process.env.LAUNCHER_SECRET_KEY ?? "",
+            ),
           },
         },
       },

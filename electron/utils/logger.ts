@@ -61,6 +61,61 @@ function formatMessage(level: string, ...args: any[]) {
     });
   };
 
+  const redactSensitiveTextForLogs = (input: string): string => {
+    let out = String(input ?? "");
+
+    // Redact CLI flags (plain text).
+    out = out.replace(/(\-\-(?:session-token|identity-token))\s+(\S+)/gi, "$1 ****");
+    out = out.replace(/(\-\-(?:session-token|identity-token))=([^\s]+)/gi, "$1=****");
+
+    // Redact CLI flags when logged as JSON arrays: ["--session-token","VALUE"].
+    out = out.replace(/("\-\-(?:session-token|identity-token)"\s*,\s*")([^"]*)(")/gi, "$1****$3");
+
+    // Redact JSON fields that commonly contain the tokens.
+    out = out.replace(/("(?:identityToken|sessionToken)"\s*:\s*")([^"]*)(")/g, "$1****$3");
+
+    return out;
+  };
+
+  const redactSensitiveStructuredForLogs = (value: any, seen: WeakSet<object>): any => {
+    if (typeof value === "string") return redactSensitiveTextForLogs(value);
+    if (typeof value !== "object" || value === null) return value;
+
+    if (seen.has(value)) return "[Circular]";
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      const out = value.slice();
+      for (let i = 0; i < out.length; i++) {
+        const v = out[i];
+        if (typeof v === "string") {
+          const lower = v.toLowerCase();
+          if ((lower === "--session-token" || lower === "--identity-token") && typeof out[i + 1] === "string") {
+            out[i + 1] = "****";
+            i++;
+            continue;
+          }
+
+          // Also handle --flag=value form inside arrays.
+          out[i] = redactSensitiveTextForLogs(v);
+        } else {
+          out[i] = redactSensitiveStructuredForLogs(v, seen);
+        }
+      }
+      return out;
+    }
+
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (k === "identityToken" || k === "sessionToken") {
+        out[k] = "****";
+        continue;
+      }
+      out[k] = redactSensitiveStructuredForLogs(v, seen);
+    }
+    return out;
+  };
+
   const render = (arg: any): string => {
     if (arg instanceof Error) {
       const base = `${arg.name}: ${arg.message}`;
@@ -80,17 +135,18 @@ function formatMessage(level: string, ...args: any[]) {
 
     if (typeof arg === "object" && arg !== null) {
       try {
-        return JSON.stringify(arg, null, 2);
+        const redacted = redactSensitiveStructuredForLogs(arg, new WeakSet());
+        return JSON.stringify(redacted, null, 2);
       } catch {
         return Object.prototype.toString.call(arg);
       }
     }
 
-    return String(arg);
+    return redactSensitiveTextForLogs(String(arg));
   };
 
   const message = args.map(render).join(" ");
-  const redacted = redactUrlQueryForLogs(message);
+  const redacted = redactSensitiveTextForLogs(redactUrlQueryForLogs(message));
   return `[${timestamp}] [${level.toUpperCase()}] ${redacted}`;
 }
 

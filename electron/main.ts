@@ -90,14 +90,42 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Set APP_ROOT early so dotenv can find .env even when process.cwd() is doing interpretive dance.
 process.env.APP_ROOT = path.join(__dirname, "..");
 
-// Load .env for local/dev runs. Packaged builds usually don't ship it, because simplicity is overrated.
-dotenv.config({ path: path.join(process.env.APP_ROOT, ".env") });
+const tryLoadDotenv = (label: string, envPath: string, override = false) => {
+  try {
+    if (!envPath) return;
+    if (!fs.existsSync(envPath)) return;
+    dotenv.config({ path: envPath, override });
+    logger.info("Loaded env file", { label, envPath });
+  } catch (e) {
+    // Never hard-fail app startup due to env file loading.
+    try {
+      logger.warn("Failed to load env file", { label, envPath }, e);
+    } catch {
+      // ignore
+    }
+  }
+};
 
-// Optional local overrides (.env.local, gitignored). CI can also inject env vars if it feels generous.
-dotenv.config({
-  path: path.join(process.env.APP_ROOT, ".env.local"),
-  override: true,
-});
+// Load .env/.env.local for local/dev runs. Packaged builds usually don't ship them.
+const appRoot = String(process.env.APP_ROOT ?? "");
+tryLoadDotenv("APP_ROOT .env", path.join(appRoot, ".env"), false);
+tryLoadDotenv("APP_ROOT .env.local", path.join(appRoot, ".env.local"), true);
+
+// Also try common runtime locations for unpacked/installed apps.
+// - process.cwd(): when launched from a folder via CLI/shortcut
+// - process.execPath dir: where the .exe lives in win-unpacked / installed builds
+tryLoadDotenv("CWD .env", path.join(process.cwd(), ".env"), false);
+tryLoadDotenv("CWD .env.local", path.join(process.cwd(), ".env.local"), true);
+tryLoadDotenv(
+  "EXE_DIR .env",
+  path.join(path.dirname(process.execPath), ".env"),
+  false,
+);
+tryLoadDotenv(
+  "EXE_DIR .env.local",
+  path.join(path.dirname(process.execPath), ".env.local"),
+  true,
+);
 
 // Windows Chromium loves shouting about non-actionable stuff, so we mute it to preserve sanity.
 try {

@@ -7,6 +7,7 @@ import LauncherUpdateModal, {
   LauncherUpdateInfo,
 } from "./components/LauncherUpdateModal";
 import { compareSemver } from "./utils/semver";
+import { useTranslation } from "react-i18next";
 import magdPng from "./assets/magd.png";
 import magdOgg from "./assets/magd.ogg";
 import simonPng from "./assets/simon.jpg";
@@ -212,6 +213,7 @@ type PrimeOriginalStyles = {
 
 export default function App() {
   const { ready, username, setUsername } = useUserContext();
+  const { t } = useTranslation();
   const [showLoader, setShowLoader] = useState(true);
   const [fade, setFade] = useState(false);
 
@@ -1927,14 +1929,14 @@ export default function App() {
 
         if (state === "uploaded") {
           setSupportTicketPhase("done");
-          setSupportTicketStatusText("Los Desarrolladores te asistiran en breve.");
+          setSupportTicketStatusText(t("supportTicket.devAssistSoon"));
           clearPoll();
           return;
         }
 
         if (state !== "pending") {
           setSupportTicketPhase("error");
-          setSupportTicketStatusText("Ticket inválido o expirado.");
+          setSupportTicketStatusText(t("supportTicket.invalidOrExpired"));
           clearPoll();
           return;
         }
@@ -1962,7 +1964,7 @@ export default function App() {
         if (!bundle || bundle.ok !== true) {
           setSupportTicketPhase("error");
           setSupportTicketStatusText(
-            "No se pudieron recopilar los logs locales.",
+            t("supportTicket.collectLogsFailed"),
           );
           clearPoll();
           return;
@@ -1992,7 +1994,7 @@ export default function App() {
 
         if (resp && resp.ok) {
           setSupportTicketPhase("done");
-          setSupportTicketStatusText("Los Desarrolladores te asistiran en breve.");
+          setSupportTicketStatusText(t("supportTicket.devAssistSoon"));
           clearPoll();
           return;
         }
@@ -2006,7 +2008,7 @@ export default function App() {
         clearPoll();
       } catch {
         setSupportTicketPhase("error");
-        setSupportTicketStatusText("No se pudo conectar al soporte.");
+        setSupportTicketStatusText(t("supportTicket.connectFailed"));
         clearPoll();
       }
     };
@@ -2017,7 +2019,7 @@ export default function App() {
     return () => {
       clearPoll();
     };
-  }, [supportTicketOpen, supportTicketCode, username, supportTicketPhase]);
+  }, [supportTicketOpen, supportTicketCode, username, supportTicketPhase, t]);
 
   return (
     <div
@@ -2842,7 +2844,7 @@ export default function App() {
                       setSupportTicketStatusText("Copied. Send it to support.");
                     } catch {
                       setSupportTicketStatusText(
-                        "No se pudo copiar automáticamente. Selecciona el código y cópialo manualmente.",
+                        t("supportTicket.copyFailed"),
                       );
                     }
                   }}

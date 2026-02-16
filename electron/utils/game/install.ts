@@ -256,7 +256,9 @@ const fetchPatchPlanNoPremium = async (opts: {
   branch: VersionType;
   currentVersion: number;
 }): Promise<PatchStep[]> => {
-  const secret = String(process.env.LAUNCHER_SECRET_KEY ?? "").trim();
+  const secret = String(
+    process.env.LAUNCHER_SECRET_KEY ?? __LAUNCHER_SECRET_KEY__ ?? "",
+  ).trim();
   if (!secret) {
     throw new Error(
       "Missing LAUNCHER_SECRET_KEY (expected in .env.local or injected by CI).",
