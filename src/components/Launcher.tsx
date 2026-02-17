@@ -2205,6 +2205,9 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                 "shadow-[0_10px_30px_rgba(0,0,0,0.35)]",
                 "text-white/90 hover:text-white",
                 "flex items-center justify-center",
+                "transition-all duration-300 ease-out",
+                "hover:-translate-y-0.5",
+                "hover:shadow-[0_15px_35px_rgba(0,0,0,0.5)]",
                 "transition",
                 "hover:border-blue-400/50 hover:ring-4 hover:ring-blue-400/10",
               )}
@@ -2526,5 +2529,6 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 };
 
 export default Launcher;
+
 
 
