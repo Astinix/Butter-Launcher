@@ -2157,33 +2157,39 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
         )}
         <div className="relative flex flex-col items-end gap-2">
           <div className="relative flex flex-row gap-4">
-            {(newsItems.length
-              ? newsItems
-              : [{ title: t("launcher.news.loading"), content: "" }])
-              .slice(0, 3)
-              .map((item, idx) => (
-                <div
-                  key={`${idx}-${item.title}`}
-                  className="w-40 h-20 bg-white/10 rounded-lg shadow-inner flex flex-col items-center text-center p-2"
-                >
-                  <div className="flex-1 w-full flex items-center justify-center">
-                    <div className="text-xs text-white font-semibold leading-tight line-clamp-3">
-                      {item.title}
-                    </div>
-                  </div>
-                  {item.content?.trim() ? (
-                    <button
-                      type="button"
-                      className="text-[10px] text-blue-300 hover:text-blue-200 underline underline-offset-2"
-                      onClick={() => setOpenNews(item)}
-                    >
-                      {t("launcher.news.showMore")}
-                    </button>
-                  ) : (
-                    <div className="h-[14px]" />
-                  )}
-                </div>
-              ))}
+      			{(newsItems.length
+      			  ? newsItems
+      			  : [{ title: t("launcher.news.loading"), content: "" }])
+      			  .slice(0, 3)
+      			  .map((item, idx) => {
+      				const hasContent = !!item.content?.trim();
+      				return (
+      				  <div
+      					key={`${idx}-${item.title}`}
+      					onClick={hasContent ? () => setOpenNews(item) : undefined}
+      					className={`
+      					  w-40 h-20 rounded-lg flex flex-col items-center text-center p-2
+      					  transition-all duration-200 ease-in-out select-none shadow-inner
+      					  ${hasContent 
+      						? "bg-white/10 group hover:bg-linear-to-r hover:from-[#0268D4] hover:to-[#02D4D4] hover:shadow-[0_0_18px_rgba(2,104,212,0.85)] hover:-translate-y-0.5" 
+      						: "bg-white/5"}
+      					`}
+      				  >
+      					<div className="flex-1 w-full flex items-center justify-center pointer-events-none">
+      					  <div className="text-xs text-white font-semibold leading-tight line-clamp-3">
+      						{item.title}
+      					  </div>
+      					</div>
+      					{hasContent ? (
+      					  <span className="text-[10px] text-blue-200 font-semibold group-hover:text-white transition-colors duration-200">
+      						{t("launcher.news.showMore")}
+      					  </span>
+      					) : (
+      					  <div className="h-[14px]" />
+      					)}
+      				  </div>
+      				);
+      			})}
 
             {/* Toggle button centered over the 3 news cards */}
             <button
@@ -2518,3 +2524,4 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 };
 
 export default Launcher;
+
