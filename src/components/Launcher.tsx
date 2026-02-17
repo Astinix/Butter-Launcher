@@ -2166,7 +2166,9 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
       				return (
       				  <div
       					key={`${idx}-${item.title}`}
+                tabIndex={hasContent ? 0 : -1}
       					onClick={hasContent ? () => setOpenNews(item) : undefined}
+                onKeyDown={(e) => hasContent && (e.key === "Enter" || e.key === " ") && setOpenNews(item)}
       					className={`
       					  w-40 h-20 rounded-lg flex flex-col items-center text-center p-2
       					  transition-all duration-200 ease-in-out select-none shadow-inner
@@ -2197,14 +2199,14 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
               className={cn(
                 "absolute left-1/2 -translate-x-1/2 -top-15 z-20",
                 "w-9 h-9 rounded-full",
-                "border border-white/25",
-                "bg-linear-to-b from-white/22 to-white/8",
+                "border border-white/10",
+                "bg-linear-to-b from-black/60 to-black/40",
                 "backdrop-blur-xl",
                 "shadow-[0_10px_30px_rgba(0,0,0,0.35)]",
                 "text-white/90 hover:text-white",
                 "flex items-center justify-center",
                 "transition",
-                "hover:border-blue-300/60 hover:ring-2 hover:ring-blue-400/25",
+                "hover:border-blue-400/50 hover:ring-4 hover:ring-blue-400/10",
               )}
               title={
                 hytaleFeedOpen
@@ -2524,4 +2526,5 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 };
 
 export default Launcher;
+
 
