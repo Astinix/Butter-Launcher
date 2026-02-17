@@ -172,7 +172,7 @@ const HostServerConsoleModal: React.FC<{
     >
       <div
         className={cn(
-          "relative w-full max-w-4xl h-[520px] mx-auto rounded-xl",
+          "relative w-[92vw] max-w-[2000px] h-[88vh] mx-auto rounded-xl",
           "bg-linear-to-b from-[#1b2030]/95 to-[#141824]/95 border border-[#2a3146]",
           "shadow-2xl px-6 py-5 flex flex-col animate-settings-in",
           closing && "animate-settings-out",

@@ -26,7 +26,7 @@ const HostServerModal: React.FC<{
       <div
         className={cn(
           `
-          relative w-full max-w-3xl h-[420px] mx-auto
+          relative w-[92vw] max-w-[1400px] h-[88vh] mx-auto
           rounded-xl
           bg-linear-to-b from-[#1b2030]/95 to-[#141824]/95
           border border-[#2a3146]
@@ -48,7 +48,7 @@ const HostServerModal: React.FC<{
           {t("hostServerModal.title")}
         </h2>
 
-        <div className="flex-1 overflow-y-auto pr-2">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
           <div className="space-y-4">
             <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-4">
               <div className="flex justify-center">

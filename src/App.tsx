@@ -217,6 +217,17 @@ export default function App() {
   const [showLoader, setShowLoader] = useState(true);
   const [fade, setFade] = useState(false);
 
+  const hasValidAccountType = (() => {
+    // Legacy upgrade guard: pre-2.0.0 had a stored username but no Premium/No-Premium choice.
+    // If we don't gate on this, the launcher can "time travel" into Premium mode by accident.
+    try {
+      const raw = (localStorage.getItem("accountType") || "").trim();
+      return raw === "premium" || raw === "nopremium";
+    } catch {
+      return false;
+    }
+  })();
+
   useEffect(() => {
     if (!window.ipcRenderer) return;
     const onForceLogout = () => {
@@ -385,11 +396,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let enableRPC = false;
+    let enableRPC = true;
     try {
-      enableRPC = !!window.localStorage.getItem("enableRPC");
+      const raw = window.localStorage.getItem("enableRPC");
+      // New default: RPC is on unless the user *explicitly* opted out.
+      // (Yes, we store a boolean in localStorage. It's fine. It's 2026, not 1996.)
+      enableRPC = raw === null ? true : String(raw).trim().toLowerCase() === "true";
+
+      // If the key is missing (common on upgrades), write it once so Settings reflects reality.
+      // Future flips are still fully user-controlled.
+      if (raw === null) {
+        try {
+          window.localStorage.setItem("enableRPC", "true");
+        } catch {
+          // ignore
+        }
+      }
     } catch {
-      enableRPC = false;
+      // If storage is unavailable, prefer "on" so the feature behaves consistently.
+      enableRPC = true;
     }
     window.ipcRenderer.send("ready", {
       enableRPC,
@@ -3424,7 +3449,7 @@ export default function App() {
         )}
         {!showLoader &&
           (ready ? (
-            username ? (
+            username && hasValidAccountType ? (
               <Launcher
                 onLogout={() => {
                   setUsername(null);

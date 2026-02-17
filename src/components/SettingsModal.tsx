@@ -23,6 +23,15 @@ const SettingsModal: React.FC<{
   onLogout?: () => void;
 }> = ({ open, onClose, onLogout }) => {
   const { t, i18n } = useTranslation();
+
+  const readEnableRpcPref = (): boolean => {
+    try {
+      const raw = localStorage.getItem("enableRPC");
+      return raw === null ? true : String(raw).trim().toLowerCase() === "true";
+    } catch {
+      return true;
+    }
+  };
   const {
     gameDir,
     setGameDir,
@@ -36,7 +45,7 @@ const SettingsModal: React.FC<{
     checkingUpdates,
   } = useGameContext();
   const [customUUID, setCustomUUID] = useState<string>("");
-  const [enableRPC, setEnableRPC] = useState<boolean>(false);
+  const [enableRPC, setEnableRPC] = useState<boolean>(() => readEnableRpcPref());
   const [startupSoundEnabled, setStartupSoundEnabled] = useState<boolean>(false);
   const [changingDir, setChangingDir] = useState(false);
 
@@ -109,8 +118,7 @@ const SettingsModal: React.FC<{
     if (!open) return;
     const storedUUID = localStorage.getItem("customUUID") || "";
     setCustomUUID(storedUUID);
-    const storedRPC = localStorage.getItem("enableRPC") || "false";
-    setEnableRPC(storedRPC === "true");
+    setEnableRPC(readEnableRpcPref());
     void (async () => {
       try {
         const res = await window.config.startupSoundGet();
@@ -152,13 +160,14 @@ const SettingsModal: React.FC<{
   }, [customUUID, normalizedUUID, open]);
 
   useEffect(() => {
-    if (enableRPC) {
-      localStorage.setItem("enableRPC", "true");
-      window.ipcRenderer.send("rpc:enable", true);
-    } else {
-      localStorage.removeItem("enableRPC");
-      window.ipcRenderer.send("rpc:enable", false);
+    try {
+      localStorage.setItem("enableRPC", enableRPC ? "true" : "false");
+    } catch {
+      // ignore
     }
+
+    // Flip the switch in the main process.
+    window.ipcRenderer.send("rpc:enable", !!enableRPC);
   }, [enableRPC]);
 
   const handleStartupSoundChange = (checked: boolean) => {
@@ -295,7 +304,7 @@ const SettingsModal: React.FC<{
       <div
         className={cn(
           `
-          relative w-full max-w-4xl h-[450px] mx-auto
+          relative w-[92vw] max-w-[1800px] h-[88vh] mx-auto
           rounded-xl
           bg-linear-to-b from-[#1b2030]/95 to-[#141824]/95
           border border-[#2a3146]
@@ -327,7 +336,7 @@ const SettingsModal: React.FC<{
         </h2>
 
         {/* CONTENT */}
-        <div className="flex-1 overflow-y-auto pr-2">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2">
           <div className="grid grid-cols-2 gap-6">
             {/* <div>
               <label className="text-gray-200 text-sm font-semibold mb-1 block">

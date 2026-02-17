@@ -2,6 +2,20 @@ const BASE_URL = "https://game-patches.hytale.com/patches";
 
 // Game version plumbing: mostly string concatenation, occasionally tears.
 
+const parseBoolLike = (raw: unknown): boolean | undefined => {
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "string") {
+    const v = raw.trim().toLowerCase();
+    if (v === "true" || v === "1" || v === "yes") return true;
+    if (v === "false" || v === "0" || v === "no") return false;
+  }
+  if (typeof raw === "number") {
+    if (raw === 1) return true;
+    if (raw === 0) return false;
+  }
+  return undefined;
+};
+
 const VERSION_DETAILS_CACHE_KEY = "versionDetailsCache:v1";
 const VERSION_DETAILS_META_KEY = "versionDetailsMeta:v1";
 
@@ -33,7 +47,7 @@ export const getManifestInfoForBuild = (
   const patch_url = typeof (detailsEntry as any)?.url === "string" ? (detailsEntry as any).url : undefined;
   const patch_hash = typeof (detailsEntry as any)?.hash === "string" ? (detailsEntry as any).hash : undefined;
   const original_url = typeof (detailsEntry as any)?.original === "string" ? (detailsEntry as any).original : undefined;
-  const proper_patch = typeof (detailsEntry as any)?.proper_patch === "boolean" ? (detailsEntry as any).proper_patch : undefined;
+  const proper_patch = parseBoolLike((detailsEntry as any)?.proper_patch);
   const patch_note = typeof (detailsEntry as any)?.patch_note === "string" ? (detailsEntry as any).patch_note : undefined;
 
   const server_url =
@@ -234,10 +248,7 @@ export const getGameVersions = async (versionType: VersionType = "release") => {
       typeof (detailsEntry as any)?.hash === "string"
         ? (detailsEntry as any).hash
         : undefined;
-    const proper_patch =
-      typeof (detailsEntry as any)?.proper_patch === "boolean"
-        ? (detailsEntry as any).proper_patch
-        : undefined;
+    const proper_patch = parseBoolLike((detailsEntry as any)?.proper_patch);
     const patch_note =
       typeof (detailsEntry as any)?.patch_note === "string"
         ? (detailsEntry as any).patch_note

@@ -61,7 +61,7 @@ const WikiModal: React.FC<{
       <div
         className={cn(
           `
-          relative w-full max-w-6xl h-[560px] mx-auto
+          relative w-[92vw] max-w-[2400px] h-[88vh] mx-auto
           rounded-xl
           bg-linear-to-b from-[#1b2030]/70 to-[#141824]/70
           border border-white/10

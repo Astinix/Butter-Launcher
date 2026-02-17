@@ -649,7 +649,7 @@ const ServersModal: React.FC<{
       <div
         className={cn(
           `
-          relative w-full max-w-4xl h-[560px] mx-auto
+          relative w-[92vw] max-w-[2200px] h-[88vh] mx-auto
           rounded-xl
           ${openedRecommendedDecor ? "bg-[#141824]/55 backdrop-blur-xl" : "bg-linear-to-b from-[#1b2030]/95 to-[#141824]/95"}
           border border-[#2a3146]

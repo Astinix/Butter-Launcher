@@ -209,6 +209,41 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const [friendsMenuOpen, setFriendsMenuOpen] = useState(false);
   const [friendsMenuOpenTo, setFriendsMenuOpenTo] = useState<"friends" | "globalChat">("friends");
   const [friendsMenuOpenNonce, setFriendsMenuOpenNonce] = useState(0);
+  const [friendsHasUnread, setFriendsHasUnread] = useState(false);
+
+  const computeFriendsHasUnread = () => {
+    try {
+      const prefix = "matcha:unread:";
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith(prefix)) continue;
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+        for (const v of Object.values(parsed as Record<string, any>)) {
+          const n = typeof v === "number" ? v : Number(v);
+          if (Number.isFinite(n) && n > 0) return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    const update = () => setFriendsHasUnread(computeFriendsHasUnread());
+    update();
+
+    const onUnreadChanged = () => update();
+    window.addEventListener("matcha:unread-changed" as any, onUnreadChanged as any);
+    window.addEventListener("focus", update);
+    return () => {
+      window.removeEventListener("matcha:unread-changed" as any, onUnreadChanged as any);
+      window.removeEventListener("focus", update);
+    };
+  }, []);
   const [hostServerWarningOpen, setHostServerWarningOpen] = useState(false);
   const [hostServerWarningShownThisSession, setHostServerWarningShownThisSession] = useState(false);
   const [hostServerStage, setHostServerStage] = useState<"root" | "local">("root");
@@ -295,6 +330,8 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
     if (hasBuild1Installed) return;
     const current = availableVersions?.[selectedVersion] ?? null;
     if (!current) return;
+    // If it's already installed, allow it to stay selected.
+    if (current.installed) return;
     if (current.build_index === 1 || current.isLatest) return;
 
     const latestIdx = availableVersions.findIndex((v) => !!v.isLatest);
@@ -735,6 +772,7 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
     const locked =
       restrictVersionsUntilBuild1 &&
       !hasBuild1Installed &&
+      !v.installed &&
       v.build_index !== 1 &&
       !allowLatestWithoutBuild1;
     if (locked) {
@@ -951,6 +989,7 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                   const isLocked =
                     restrictVersionsUntilBuild1 &&
                     !hasBuild1Installed &&
+                    !v.installed &&
                     v.build_index !== 1 &&
                     !allowLatestWithoutBuild1;
                   const isRunningBuild =
@@ -1648,8 +1687,13 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                   "backdrop-blur-md text-white text-sm font-bold",
                   "flex items-center gap-2",
                   "transition duration-200",
-                  "hover:border-blue-400/70 hover:ring-2 hover:ring-blue-400/35",
-                  "hover:shadow-[0_0_18px_rgba(2,104,212,0.85)]",
+                  friendsHasUnread
+                    ? "hover:border-green-400/70 hover:ring-2 hover:ring-green-400/35"
+                    : "hover:border-blue-400/70 hover:ring-2 hover:ring-blue-400/35",
+                  friendsHasUnread
+                    ? "hover:shadow-[0_0_18px_rgba(34,197,94,0.65)]"
+                    : "hover:shadow-[0_0_18px_rgba(2,104,212,0.85)]",
+                  friendsHasUnread && !friendsMenuOpen && "border-green-300/40 ring-2 ring-green-400/25 shadow-[0_0_18px_rgba(34,197,94,0.65)] animate-pulse",
                 )}
                 title={t("launcher.buttons.friends")}
                 onClick={() => setFriendsMenuOpen((v) => !v)}
@@ -2158,32 +2202,40 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
         <div className="relative flex flex-col items-end gap-2">
           <div className="relative flex flex-row gap-4">
             {(newsItems.length
-              ? newsItems
-              : [{ title: t("launcher.news.loading"), content: "" }])
-              .slice(0, 3)
-              .map((item, idx) => (
-                <div
-                  key={`${idx}-${item.title}`}
-                  className="w-40 h-20 bg-white/10 rounded-lg shadow-inner flex flex-col items-center text-center p-2"
-                >
-                  <div className="flex-1 w-full flex items-center justify-center">
-                    <div className="text-xs text-white font-semibold leading-tight line-clamp-3">
-                      {item.title}
-                    </div>
-                  </div>
-                  {item.content?.trim() ? (
-                    <button
-                      type="button"
-                      className="text-[10px] text-blue-300 hover:text-blue-200 underline underline-offset-2"
-                      onClick={() => setOpenNews(item)}
-                    >
-                      {t("launcher.news.showMore")}
-                    </button>
-                  ) : (
-                    <div className="h-[14px]" />
-                  )}
-                </div>
-              ))}
+      			  ? newsItems
+      			  : [{ title: t("launcher.news.loading"), content: "" }])
+      			  .slice(0, 3)
+      			  .map((item, idx) => {
+      				const hasContent = !!item.content?.trim();
+      				return (
+      				  <div
+      					key={`${idx}-${item.title}`}
+                tabIndex={hasContent ? 0 : -1}
+      					onClick={hasContent ? () => setOpenNews(item) : undefined}
+                onKeyDown={(e) => hasContent && (e.key === "Enter" || e.key === " ") && setOpenNews(item)}
+      					className={`
+      					  w-40 h-20 rounded-lg flex flex-col items-center text-center p-2
+      					  transition-all duration-200 ease-in-out select-none shadow-inner
+      					  ${hasContent 
+      						? "bg-white/10 group hover:bg-linear-to-r hover:from-[#0268D4] hover:to-[#02D4D4] hover:shadow-[0_0_18px_rgba(2,104,212,0.85)] hover:-translate-y-0.5" 
+      						: "bg-white/5"}
+      					`}
+      				  >
+      					<div className="flex-1 w-full flex items-center justify-center pointer-events-none">
+      					  <div className="text-xs text-white font-semibold leading-tight line-clamp-3">
+      						{item.title}
+      					  </div>
+      					</div>
+      					{hasContent ? (
+      					  <span className="text-[10px] text-blue-200 font-semibold group-hover:text-white transition-colors duration-200">
+      						{t("launcher.news.showMore")}
+      					  </span>
+      					) : (
+      					  <div className="h-[14px]" />
+      					)}
+      				  </div>
+      				);
+      			})}
 
             {/* Toggle button centered over the 3 news cards */}
             <button
@@ -2191,14 +2243,17 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
               className={cn(
                 "absolute left-1/2 -translate-x-1/2 -top-15 z-20",
                 "w-9 h-9 rounded-full",
-                "border border-white/25",
-                "bg-linear-to-b from-white/22 to-white/8",
+                "border border-white/10",
+                "bg-linear-to-b from-black/60 to-black/40",
                 "backdrop-blur-xl",
                 "shadow-[0_10px_30px_rgba(0,0,0,0.35)]",
                 "text-white/90 hover:text-white",
                 "flex items-center justify-center",
+                "transition-all duration-300 ease-out",
+                "hover:-translate-y-0.5",
+                "hover:shadow-[0_15px_35px_rgba(0,0,0,0.5)]",
                 "transition",
-                "hover:border-blue-300/60 hover:ring-2 hover:ring-blue-400/25",
+                "hover:border-blue-400/50 hover:ring-4 hover:ring-blue-400/10",
               )}
               title={
                 hytaleFeedOpen

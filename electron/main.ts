@@ -3285,7 +3285,11 @@ ipcMain.on(
 
   const win = BrowserWindow.fromWebContents(e.sender);
   if (win) {
-    const isNoPremium = String(accountType ?? "").toLowerCase() === "nopremium";
+    const normalized = String(accountType ?? "").trim().toLowerCase();
+    // If accountType is missing (common on upgrades from pre-2.0.0), default to No-Premium.
+    // It's safer to be boring than to accidentally enable Premium codepaths.
+    const isPremium = normalized === "premium";
+    const isNoPremium = !isPremium;
     const forceFullInstall =
       isNoPremium && !!version?.isLatest;
     void ((forceFullInstall || !isNoPremium)
@@ -3322,7 +3326,9 @@ ipcMain.on(
 
     const win = BrowserWindow.fromWebContents(e.sender);
     if (win) {
-      const isNoPremium = String(accountType ?? "").toLowerCase() === "nopremium";
+      const normalized = String(accountType ?? "").trim().toLowerCase();
+      const isPremium = normalized === "premium";
+      const isNoPremium = !isPremium;
       const forceFullInstall =
         isNoPremium && !!version?.isLatest;
       void (forceFullInstall

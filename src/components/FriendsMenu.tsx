@@ -7,6 +7,64 @@ import matchaIcon from "../assets/matcha-icon.png";
 import matchaStartSfx from "../assets/matchastart.ogg";
 import notiSfx from "../assets/noti.ogg";
 
+const MAX_MSG_LINE_BREAKS = 3;
+
+const countLineBreaks = (raw: string) => {
+  const s = String(raw || "");
+  // Count \n only (textarea on web/electron uses \n).
+  return (s.match(/\n/g) || []).length;
+};
+
+type HttpLinkPart = { type: "text" | "link"; value: string; href?: string };
+
+const splitHttpLinks = (content: string): HttpLinkPart[] => {
+  const text = String(content || "");
+  const parts: HttpLinkPart[] = [];
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+
+  let lastIndex = 0;
+  for (const match of text.matchAll(urlRegex)) {
+    const raw = String(match[0] || "");
+    const start = match.index ?? -1;
+    if (start < 0) continue;
+
+    if (start > lastIndex) {
+      parts.push({ type: "text", value: text.slice(lastIndex, start) });
+    }
+
+    // Trim common trailing punctuation that should not be part of the URL.
+    const trimmed = raw.replace(/[),.;\]]+$/g, "");
+    const href = trimmed;
+    parts.push({ type: "link", value: trimmed, href });
+    lastIndex = start + raw.length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: "text", value: text.slice(lastIndex) });
+  }
+
+  return parts.length ? parts : [{ type: "text", value: text }];
+};
+
+const openExternalSafe = async (url: string) => {
+  const u = String(url || "").trim();
+  if (!/^https?:\/\//i.test(u)) return;
+  try {
+    const opener = (window as any)?.config?.openExternal;
+    if (typeof opener === "function") {
+      await opener(u);
+      return;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    window.open(u, "_blank", "noopener,noreferrer");
+  } catch {
+    // ignore
+  }
+};
+
 const API_BASE = "https://butter.lat";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 const WS_URL = `${WS_BASE}/api/matcha/ws`;
@@ -136,6 +194,15 @@ const writeUnreadMap = (meId: string, map: Record<string, number>) => {
   }
 };
 
+const emitUnreadChanged = (meId: string, map: Record<string, number>) => {
+  try {
+    const total = Object.values(map || {}).reduce((acc, v) => acc + (typeof v === "number" && Number.isFinite(v) ? v : 0), 0);
+    window.dispatchEvent(new CustomEvent("matcha:unread-changed", { detail: { meId, total } }));
+  } catch {
+    // ignore
+  }
+};
+
 const readDnd = (meId: string): boolean => {
   try {
     const key = dndKeyFor(meId);
@@ -185,6 +252,9 @@ export default function FriendsMenu({
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileErr, setProfileErr] = useState<string>("");
   const [profileUser, setProfileUser] = useState<MatchaMe | null>(null);
+  const [profileUsernameCopied, setProfileUsernameCopied] = useState(false);
+  const profileUsernameCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tiny UX dopamine: otherwise the user will click "Copy" five times, just to be sure.
 
   const [loginHandle, setLoginHandle] = useState("");
   const [loginPass, setLoginPass] = useState("");
@@ -343,13 +413,14 @@ export default function FriendsMenu({
     return base.slice(0, 2).toUpperCase();
   };
 
-  const copyToClipboard = async (text: string) => {
+  const copyToClipboard = async (text: string): Promise<boolean> => {
     const t = String(text || "");
-    if (!t) return;
+    if (!t) return false;
     try {
       if (navigator?.clipboard?.writeText) {
+        // Clipboard API: modern, async, and still somehow a little magical.
         await navigator.clipboard.writeText(t);
-        return;
+        return true;
       }
     } catch {
       // fallback below
@@ -366,10 +437,23 @@ export default function FriendsMenu({
       ta.select();
       document.execCommand("copy");
       document.body.removeChild(ta);
+      // execCommand("copy") is the vintage fallback we keep around like a lucky charm.
+      return true;
     } catch {
       // ignore
     }
+
+    return false;
   };
+
+  useEffect(() => {
+    if (profileOpen) return;
+    if (profileUsernameCopiedTimerRef.current) {
+      clearTimeout(profileUsernameCopiedTimerRef.current);
+      profileUsernameCopiedTimerRef.current = null;
+    }
+    setProfileUsernameCopied(false);
+  }, [profileOpen]);
 
   const saveToken = (t: string | null) => {
     setToken(t);
@@ -542,6 +626,7 @@ export default function FriendsMenu({
   useEffect(() => {
     if (!me?.id) return;
     writeUnreadMap(me.id, unreadDmByFriendId);
+    emitUnreadChanged(me.id, unreadDmByFriendId);
   }, [me?.id, unreadDmByFriendId]);
 
   useEffect(() => {
@@ -1380,8 +1465,42 @@ export default function FriendsMenu({
                       <div className="text-[10px] font-extrabold tracking-widest text-white/60 uppercase">
                         {t("friendsMenu.profile.username")}
                       </div>
-                      <div className="mt-1 text-sm font-bold text-white/90">
-                        {profileLoading ? t("common.loading") : profileUser?.handle || me?.handle || "—"}
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <div className="min-w-0 text-sm font-bold text-white/90 truncate">
+                          {profileLoading ? t("common.loading") : profileUser?.handle || me?.handle || "—"}
+                        </div>
+
+                        <button
+                          type="button"
+                          className={cn(
+                            "shrink-0 px-3 h-8 rounded-lg font-extrabold text-xs border border-white/10",
+                            "bg-black/35 hover:bg-white/5 transition text-white",
+                          )}
+                          onClick={() => {
+                            const handle = String(profileUser?.handle || me?.handle || "").trim();
+                            if (!handle || profileLoading) return;
+
+                            void (async () => {
+                              const ok = await copyToClipboard(handle);
+                              if (!ok) return;
+
+                              setProfileUsernameCopied(true);
+                              if (profileUsernameCopiedTimerRef.current) {
+                                clearTimeout(profileUsernameCopiedTimerRef.current);
+                              }
+                              profileUsernameCopiedTimerRef.current = setTimeout(() => {
+                                setProfileUsernameCopied(false);
+                                profileUsernameCopiedTimerRef.current = null;
+                              }, 1500);
+                            })();
+                          }}
+                          disabled={profileLoading || !String(profileUser?.handle || me?.handle || "").trim()}
+                          title={t("friendsMenu.copy")}
+                        >
+                          {profileUsernameCopied
+                            ? t("friendsMenu.profile.usernameCopied")
+                            : t("friendsMenu.copy")}
+                        </button>
                       </div>
                     </div>
 
@@ -2158,7 +2277,23 @@ export default function FriendsMenu({
                                   ? m.deletedByAdmin
                                     ? t("friendsMenu.deletedByAdmin")
                                     : t("friendsMenu.deleted")
-                                  : m.body}
+                                  : splitHttpLinks(String(m.body || "")).map((p, idx) =>
+                                      p.type === "link" && p.href ? (
+                                        <a
+                                          key={idx}
+                                          href={p.href}
+                                          className="text-blue-300 hover:text-blue-200 underline underline-offset-2 break-all"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            void openExternalSafe(p.href!);
+                                          }}
+                                        >
+                                          {p.value}
+                                        </a>
+                                      ) : (
+                                        <span key={idx}>{p.value}</span>
+                                      ),
+                                    )}
                               </div>
                             </div>
 
@@ -2263,30 +2398,54 @@ export default function FriendsMenu({
                   ) : null}
 
                   <div className="flex gap-2">
-                    <input
+                    <textarea
+                      rows={1}
                       value={msgText}
-                      onChange={(e) => setMsgText(e.target.value)}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        if (countLineBreaks(next) > MAX_MSG_LINE_BREAKS) return;
+                        setMsgText(next);
+                      }}
                       placeholder={appView === "globalChat" ? t("friendsMenu.placeholders.globalMessage") : t("friendsMenu.placeholders.dmMessage")}
                       disabled={appView === "dm" && !selectedFriend}
                       className={cn(
                         "flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500",
+                        "resize-none min-h-[40px] max-h-24 overflow-y-auto",
                         appView === "dm" && !selectedFriend && "opacity-60 cursor-not-allowed",
                       )}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") void sendMessage();
+                        if (e.key !== "Enter") return;
+                        if (e.shiftKey) {
+                          // Shift+Enter adds a line break (up to MAX).
+                          if (countLineBreaks(msgText) >= MAX_MSG_LINE_BREAKS) {
+                            e.preventDefault();
+                          }
+                          return;
+                        }
+
+                        // Enter sends.
+                        e.preventDefault();
+                        void sendMessage();
                       }}
                     />
-                    <button
-                      type="button"
-                      disabled={appView === "dm" && !selectedFriend}
-                      className={cn(
-                        "px-3 py-2 rounded-lg border border-white/10 bg-black/35 hover:bg-white/5 transition",
-                        appView === "dm" && !selectedFriend && "opacity-60 cursor-not-allowed hover:bg-black/35",
-                      )}
-                      onClick={() => void sendMessage()}
-                    >
-                      {t("common.send")}
-                    </button>
+                    <div className="relative shrink-0">
+                      {countLineBreaks(msgText) > 0 ? (
+                        <div className="absolute -top-4 right-0 px-1.5 py-0.5 rounded-md border border-white/10 bg-black/35 text-[10px] text-white/80">
+                          {Math.min(countLineBreaks(msgText), MAX_MSG_LINE_BREAKS)}/{MAX_MSG_LINE_BREAKS}
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={appView === "dm" && !selectedFriend}
+                        className={cn(
+                          "px-3 py-2 rounded-lg border border-white/10 bg-black/35 hover:bg-white/5 transition",
+                          appView === "dm" && !selectedFriend && "opacity-60 cursor-not-allowed hover:bg-black/35",
+                        )}
+                        onClick={() => void sendMessage()}
+                      >
+                        {t("common.send")}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </>
