@@ -88,3 +88,5 @@ declare namespace JSX {
     webview: any;
   }
 }
+
+type AccountType = "premium" | "nopremium";

@@ -9,8 +9,6 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
 }) => {
   const { t } = useTranslation();
 
-  type AccountType = "premium" | "nopremium";
-
   const storedAccountType = useMemo<AccountType | null>(() => {
     try {
       const raw = localStorage.getItem("accountType");
@@ -20,7 +18,9 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
     }
   }, []);
 
-  const [accountType, setAccountType] = useState<AccountType | null>(storedAccountType);
+  const [accountType, setAccountType] = useState<AccountType | null>(
+    storedAccountType,
+  );
   const [premiumError, setPremiumError] = useState<string | null>(null);
   const [premiumWorking, setPremiumWorking] = useState(false);
   const [showPremiumCancel, setShowPremiumCancel] = useState(false);
@@ -30,16 +30,13 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
   const MAX_NICK_LEN = 16;
 
   const [nick, setNick] = useState("");
-  const [error, setError] = useState<
-    | {
-        key:
-          | "login.errors.empty"
-          | "login.errors.minLength"
-          | "login.errors.maxLength";
-        params?: Record<string, unknown>;
-      }
-    | null
-  >(null);
+  const [error, setError] = useState<{
+    key:
+      | "login.errors.empty"
+      | "login.errors.minLength"
+      | "login.errors.maxLength";
+    params?: Record<string, unknown>;
+  } | null>(null);
 
   useEffect(() => {
     if (accountType !== "premium") return;
@@ -195,7 +192,9 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
 
         {accountType === null ? (
           <div className="flex flex-col gap-2">
-            <p className="mb-2 text-gray-400 text-sm text-center">{t("login.accountTypePrompt")}</p>
+            <p className="mb-2 text-gray-400 text-sm text-center">
+              {t("login.accountTypePrompt")}
+            </p>
             <button
               type="button"
               onClick={() => persistAccountType("premium")}
@@ -227,7 +226,9 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
           </div>
         ) : accountType === "premium" ? (
           <div className="flex flex-col gap-2">
-            <p className="mb-2 text-gray-400 text-sm text-center">{t("login.premiumPrompt")}</p>
+            <p className="mb-2 text-gray-400 text-sm text-center">
+              {t("login.premiumPrompt")}
+            </p>
             <button
               type="button"
               onClick={startPremiumLogin}
@@ -271,8 +272,14 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
           </div>
         ) : (
           <>
-            <p className="mb-3 text-gray-400 text-sm text-center">{t("login.prompt")}</p>
-            <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-2">
+            <p className="mb-3 text-gray-400 text-sm text-center">
+              {t("login.prompt")}
+            </p>
+            <form
+              onSubmit={handleSubmit}
+              noValidate
+              className="flex flex-col gap-2"
+            >
               <input
                 type="text"
                 placeholder={t("login.nicknamePlaceholder")}
@@ -290,10 +297,15 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
                 "
               />
               {error ? (
-                <span className="text-red-400 text-xs">{t(error.key, error.params)}</span>
+                <span className="text-red-400 text-xs">
+                  {t(error.key, error.params)}
+                </span>
               ) : null}
               <p className="px-2 text-gray-400 text-xs">
-                {t("login.characters", { current: nick.length, max: MAX_NICK_LEN })}
+                {t("login.characters", {
+                  current: nick.length,
+                  max: MAX_NICK_LEN,
+                })}
               </p>
               <button
                 type="submit"

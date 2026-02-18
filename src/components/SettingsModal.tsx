@@ -44,16 +44,21 @@ const SettingsModal: React.FC<{
     checkForUpdates,
     checkingUpdates,
   } = useGameContext();
+  const [accountType, setAccountType] = useState<AccountType | null>();
   const [customUUID, setCustomUUID] = useState<string>("");
-  const [enableRPC, setEnableRPC] = useState<boolean>(() => readEnableRpcPref());
-  const [startupSoundEnabled, setStartupSoundEnabled] = useState<boolean>(false);
+  const [enableRPC, setEnableRPC] = useState<boolean>(() =>
+    readEnableRpcPref(),
+  );
+  const [startupSoundEnabled, setStartupSoundEnabled] =
+    useState<boolean>(false);
   const [changingDir, setChangingDir] = useState(false);
 
   const [removeOnlinePatchOpen, setRemoveOnlinePatchOpen] = useState(false);
 
   const [onlinePatchEnabledForSelected, setOnlinePatchEnabledForSelected] =
     useState(false);
-  const [checkingOnlinePatchState, setCheckingOnlinePatchState] = useState(false);
+  const [checkingOnlinePatchState, setCheckingOnlinePatchState] =
+    useState(false);
   const onlinePatchStateSeq = useRef(0);
 
   const [steamDeckMode, setSteamDeckMode] = useState(false);
@@ -139,6 +144,17 @@ const SettingsModal: React.FC<{
         // ignore
       }
     })();
+
+    (async () => {
+      try {
+        const raw = localStorage.getItem("accountType");
+        if (raw) {
+          setAccountType(raw as AccountType);
+        }
+      } catch {
+        // ignore
+      }
+    })();
   }, [open]);
 
   useEffect(() => {
@@ -189,9 +205,11 @@ const SettingsModal: React.FC<{
 
   const currentLangCode = (i18n.language || "en").split("-")[0].toLowerCase();
   const isRTL = (RTL_LANGUAGES as readonly string[]).includes(currentLangCode);
-  const lang = (Object.prototype.hasOwnProperty.call(LANGUAGES, currentLangCode)
-    ? currentLangCode
-    : "en") as keyof typeof LANGUAGES;
+  const lang = (
+    Object.prototype.hasOwnProperty.call(LANGUAGES, currentLangCode)
+      ? currentLangCode
+      : "en"
+  ) as keyof typeof LANGUAGES;
 
   const changeLanguage = (next: keyof typeof LANGUAGES) => {
     void i18n.changeLanguage(next);
@@ -270,7 +288,9 @@ const SettingsModal: React.FC<{
     setSteamDeckMode(next);
     setSteamDeckWorking(true);
     setSteamDeckStatus(
-      next ? t("settings.steamDeck.applying") : t("settings.steamDeck.restoring"),
+      next
+        ? t("settings.steamDeck.applying")
+        : t("settings.steamDeck.restoring"),
     );
     try {
       const dir = gameDir ?? (await window.config.getDefaultGameDirectory());
@@ -356,7 +376,9 @@ const SettingsModal: React.FC<{
                 className="w-full flex items-center justify-between bg-[#1f2538] hover:bg-[#262d44] border border-[#2a3146] rounded-lg px-4 py-2 text-white transition"
                 onClick={handleOpenGameDir}
               >
-                <span className="text-sm">{t("settings.gameDirectory.openFolder")}</span>
+                <span className="text-sm">
+                  {t("settings.gameDirectory.openFolder")}
+                </span>
                 <IconFolderOpen size={18} />
               </button>
             </div>
@@ -382,41 +404,44 @@ const SettingsModal: React.FC<{
               </div>
             </div>
 
-
-            <div className="col-span-2 space-y-2">
-              <label className="text-xs uppercase tracking-widest text-gray-400">
-                {t("settings.customUUID.label")}
-              </label>
-              <input
-                value={customUUID}
-                onChange={(e) => setCustomUUID(e.target.value)}
-                placeholder={t("settings.customUUID.placeholder")}
-                className="w-full px-3 py-2 rounded-lg bg-[#1f2538] text-white border border-[#2a3146] focus:outline-none focus:border-blue-500 transition"
-                spellCheck={false}
-                autoCapitalize="none"
-                autoCorrect="off"
-                inputMode="text"
-              />
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-gray-400">
-                  {customUUID.trim().length === 0
-                    ? t("settings.customUUID.usesAuto")
-                    : normalizedUUID === "__invalid__"
-                      ? t("settings.customUUID.invalid")
-                      : t("settings.customUUID.saved", { uuid: normalizedUUID })}
-                </span>
-                <button
-                  type="button"
-                  className="text-[10px] text-red-400 hover:text-red-300 transition"
-                  onClick={() => {
-                    setCustomUUID("");
-                    localStorage.removeItem("customUUID");
-                  }}
-                >
-                  {t("common.clear")}
-                </button>
+            {accountType === "nopremium" && (
+              <div className="col-span-2 space-y-2">
+                <label className="text-xs uppercase tracking-widest text-gray-400">
+                  {t("settings.customUUID.label")}
+                </label>
+                <input
+                  value={customUUID}
+                  onChange={(e) => setCustomUUID(e.target.value)}
+                  placeholder={t("settings.customUUID.placeholder")}
+                  className="w-full px-3 py-2 rounded-lg bg-[#1f2538] text-white border border-[#2a3146] focus:outline-none focus:border-blue-500 transition"
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  inputMode="text"
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-gray-400">
+                    {customUUID.trim().length === 0
+                      ? t("settings.customUUID.usesAuto")
+                      : normalizedUUID === "__invalid__"
+                        ? t("settings.customUUID.invalid")
+                        : t("settings.customUUID.saved", {
+                            uuid: normalizedUUID,
+                          })}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-[10px] text-red-400 hover:text-red-300 transition"
+                    onClick={() => {
+                      setCustomUUID("");
+                      localStorage.removeItem("customUUID");
+                    }}
+                  >
+                    {t("common.clear")}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             <label className="w-fit flex gap-2 items-center text-xs uppercase tracking-widest text-gray-400">
               <p>{t("settings.discordRPC")}:</p>
@@ -462,7 +487,9 @@ const SettingsModal: React.FC<{
                     startupSoundEnabled && "border-blue-300 bg-blue-500",
                   )}
                 />
-                {startupSoundEnabled ? t("common.enabled") : t("common.disabled")}
+                {startupSoundEnabled
+                  ? t("common.enabled")
+                  : t("common.disabled")}
               </div>
             </label>
 
@@ -473,7 +500,9 @@ const SettingsModal: React.FC<{
                   type="checkbox"
                   checked={steamDeckMode}
                   disabled={!isLinux || steamDeckWorking}
-                  onChange={(e) => void handleToggleSteamDeckMode(e.target.checked)}
+                  onChange={(e) =>
+                    void handleToggleSteamDeckMode(e.target.checked)
+                  }
                   className="hidden sr-only peer"
                 />
                 <div
@@ -536,13 +565,13 @@ const SettingsModal: React.FC<{
                         ? t("settings.onlinePatch.requireInstalled")
                         : selectedIsRunning
                           ? t("settings.onlinePatch.requireGameClosed")
-                        : checkingOnlinePatchState
-                          ? t("settings.onlinePatch.checkingState")
-                          : !onlinePatchEnabledForSelected
-                            ? t("settings.onlinePatch.requireEnabled")
-                        : patchingOnline
-                          ? t("settings.onlinePatch.inProgress")
-                          : ""
+                          : checkingOnlinePatchState
+                            ? t("settings.onlinePatch.checkingState")
+                            : !onlinePatchEnabledForSelected
+                              ? t("settings.onlinePatch.requireEnabled")
+                              : patchingOnline
+                                ? t("settings.onlinePatch.inProgress")
+                                : ""
                 }
               >
                 <span className="text-sm">
@@ -595,7 +624,10 @@ const SettingsModal: React.FC<{
         <div className="pt-4 mt-4 border-t border-[#2a3146] flex items-center justify-between gap-4">
           <div className="text-left">
             <div className="text-xs text-gray-400">
-              {t("settings.madeBy")}: <span className="font-extrabold tracking-wide bg-linear-to-r from-blue-500 via-cyan-400 to-blue-500 bg-clip-text text-transparent bg-chroma-animated animate-chroma-shift">{t("settings.teamName")}</span>
+              {t("settings.madeBy")}:{" "}
+              <span className="font-extrabold tracking-wide bg-linear-to-r from-blue-500 via-cyan-400 to-blue-500 bg-clip-text text-transparent bg-chroma-animated animate-chroma-shift">
+                {t("settings.teamName")}
+              </span>
             </div>
 
             <button
@@ -613,14 +645,20 @@ const SettingsModal: React.FC<{
             </label>
             <select
               value={lang}
-              onChange={(e) => changeLanguage(e.target.value as keyof typeof LANGUAGES)}
+              onChange={(e) =>
+                changeLanguage(e.target.value as keyof typeof LANGUAGES)
+              }
               className="bg-[#1a1f2e] border border-[#2a3146] text-white rounded-lg p-2 outline-none"
             >
               {Object.entries(LANGUAGES).map(([code, info]) => (
                 <option
                   key={code}
                   value={code}
-                  dir={(RTL_LANGUAGES as readonly string[]).includes(code) ? "rtl" : "ltr"}
+                  dir={
+                    (RTL_LANGUAGES as readonly string[]).includes(code)
+                      ? "rtl"
+                      : "ltr"
+                  }
                 >
                   {info.flag} {info.name}
                 </option>
@@ -678,71 +716,103 @@ const SettingsModal: React.FC<{
                     Project Lead &amp; Lead Developer
                   </div>
                   <div className="mt-1 text-sm text-gray-200">
-                    <span className="text-blue-400">vZyle</span> (Project Concept, Launcher Development, Online Client Patching System)
+                    <span className="text-blue-400">vZyle</span> (Project
+                    Concept, Launcher Development, Online Client Patching
+                    System)
                   </div>
 
                   <div className="mt-4 text-[11px] text-gray-400 font-bold uppercase">
                     Launcher Developer
                   </div>
                   <div className="mt-1 text-sm text-gray-200">
-                    <span className="text-blue-400">Fitzxel</span> (Launcher Programming)
+                    <span className="text-blue-400">Fitzxel</span> (Launcher
+                    Programming)
                   </div>
 
                   <div className="mt-4 text-[11px] text-gray-400 font-bold uppercase">
                     Lead Graphic Designer
                   </div>
                   <div className="mt-1 text-sm text-gray-200">
-                    <span className="text-blue-400">primeisonline</span> (Graphic Design and Matcha! system)
+                    <span className="text-blue-400">primeisonline</span>{" "}
+                    (Graphic Design and Matcha! system)
                   </div>
 
                   <div className="mt-4 text-[11px] text-gray-400 font-bold uppercase">
                     Operations Manager &amp; Localization Lead
                   </div>
                   <div className="mt-1 text-sm text-gray-200">
-                    <span className="text-blue-400">KaiZorakDEV</span> (Discord Management, Server Organization, Translation Systems)
+                    <span className="text-blue-400">KaiZorakDEV</span> (Discord
+                    Management, Server Organization, Translation Systems)
                   </div>
 
                   <div className="mt-4 text-[11px] text-gray-400 font-bold uppercase">
                     Server Patching &amp; Deployment Specialist
                   </div>
                   <div className="mt-1 text-sm text-gray-200">
-                    <span className="text-blue-400">Nexusatko</span> (Online Server Patching, Dedicated Server Setup Support, Czech &amp; Slovak Translation)
+                    <span className="text-blue-400">Nexusatko</span> (Online
+                    Server Patching, Dedicated Server Setup Support, Czech &amp;
+                    Slovak Translation)
                   </div>
 
                   <div className="mt-4 text-[11px] text-gray-400 font-bold uppercase">
                     Technical Advisor
                   </div>
                   <div className="mt-1 text-sm text-gray-200">
-                    <span className="text-blue-400">IkyMax</span> (Game Server Architecture Consultant)
+                    <span className="text-blue-400">IkyMax</span> (Game Server
+                    Architecture Consultant)
                   </div>
 
                   <div className="mt-4 text-[11px] text-gray-400 font-bold uppercase">
                     Web Designer
                   </div>
                   <div className="mt-1 text-sm text-gray-200">
-                    <span className="text-blue-400">Lunar Katsu</span> (Website Design)
+                    <span className="text-blue-400">Lunar Katsu</span> (Website
+                    Design)
                   </div>
 
                   <div className="mt-4 text-[11px] text-gray-400 font-bold uppercase">
                     Localization Team
                   </div>
                   <div className="mt-2 space-y-1 text-sm text-gray-200">
-                    <div><span className="text-blue-400">Kapugoat</span> (Spanish)</div>
-                    <div><span className="text-blue-400">SaYrZ</span> (Arabic)</div>
-                    <div><span className="text-blue-400">multyfora</span> (Russian)</div>
-                    <div><span className="text-blue-400">bimbimbamreal</span> (German)</div>
-                    <div><span className="text-blue-400">mobun</span> (Vietnamese)</div>
-                    <div><span className="text-blue-400">polished_mercury</span> (Polish)</div>
-                    <div><span className="text-blue-400">farrdev</span> (Indonesian)</div>
-                    <div><span className="text-blue-400">fine_xd_</span> (Persian/Farsi)</div>
-                    <div><span className="text-blue-400">Astinix</span> (Ukrainian)</div>
+                    <div>
+                      <span className="text-blue-400">Kapugoat</span> (Spanish)
+                    </div>
+                    <div>
+                      <span className="text-blue-400">SaYrZ</span> (Arabic)
+                    </div>
+                    <div>
+                      <span className="text-blue-400">multyfora</span> (Russian)
+                    </div>
+                    <div>
+                      <span className="text-blue-400">bimbimbamreal</span>{" "}
+                      (German)
+                    </div>
+                    <div>
+                      <span className="text-blue-400">mobun</span> (Vietnamese)
+                    </div>
+                    <div>
+                      <span className="text-blue-400">polished_mercury</span>{" "}
+                      (Polish)
+                    </div>
+                    <div>
+                      <span className="text-blue-400">farrdev</span>{" "}
+                      (Indonesian)
+                    </div>
+                    <div>
+                      <span className="text-blue-400">fine_xd_</span>{" "}
+                      (Persian/Farsi)
+                    </div>
+                    <div>
+                      <span className="text-blue-400">Astinix</span> (Ukrainian)
+                    </div>
                   </div>
 
                   <div className="mt-4 text-[11px] text-gray-400 font-bold uppercase">
                     Special Thanks
                   </div>
                   <div className="mt-1 text-sm text-gray-200">
-                    <span className="text-blue-400">Magd &amp; Kyo</span> (Honorable Mentions)
+                    <span className="text-blue-400">Magd &amp; Kyo</span>{" "}
+                    (Honorable Mentions)
                   </div>
 
                   <div className="mt-4 text-sm text-gray-200">

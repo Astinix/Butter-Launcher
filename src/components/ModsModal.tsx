@@ -83,11 +83,14 @@ const ModsModal: React.FC<{
   open: boolean;
   onClose: () => void;
 }> = ({ open, onClose }) => {
-  const { gameDir, availableVersions, selectedVersion, versionType } = useGameContext();
+  const { gameDir, availableVersions, selectedVersion, versionType } =
+    useGameContext();
   const { t } = useTranslation();
   const [closing, setClosing] = useState(false);
 
-  const [tab, setTab] = useState<"discover" | "installed" | "profiles">("discover");
+  const [tab, setTab] = useState<"discover" | "installed" | "profiles">(
+    "discover",
+  );
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<BrowseSort>("popularity");
   const [pageIndex, setPageIndex] = useState(0);
@@ -114,9 +117,10 @@ const ModsModal: React.FC<{
   }>({ open: false, src: "", alt: "", zoomed: false });
 
   const imageViewerImgRef = useRef<HTMLImageElement | null>(null);
-  const [imageViewerZoomDims, setImageViewerZoomDims] = useState<{ w: number; h: number } | null>(
-    null,
-  );
+  const [imageViewerZoomDims, setImageViewerZoomDims] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
 
   const [installingId, setInstallingId] = useState<number | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<
@@ -129,7 +133,9 @@ const ModsModal: React.FC<{
   const [installedItems, setInstalledItems] = useState<InstalledModFile[]>([]);
 
   const [registryError, setRegistryError] = useState<string>("");
-  const [registryByModId, setRegistryByModId] = useState<Record<number, ModRegistryEntry>>({});
+  const [registryByModId, setRegistryByModId] = useState<
+    Record<number, ModRegistryEntry>
+  >({});
 
   const [profilesLoading, setProfilesLoading] = useState(false);
   const [profilesError, setProfilesError] = useState<string>("");
@@ -150,12 +156,17 @@ const ModsModal: React.FC<{
   const [importing, setImporting] = useState(false);
   const [importNotice, setImportNotice] = useState<string>("");
   const [importError, setImportError] = useState<string>("");
-  const [importCurrent, setImportCurrent] = useState<{ idx: number; total: number; modId?: number; name: string } | null>(
-    null,
-  );
+  const [importCurrent, setImportCurrent] = useState<{
+    idx: number;
+    total: number;
+    modId?: number;
+    name: string;
+  } | null>(null);
 
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
-  const [importPreviewPack, setImportPreviewPack] = useState<ModPackV1 | null>(null);
+  const [importPreviewPack, setImportPreviewPack] = useState<ModPackV1 | null>(
+    null,
+  );
 
   const [integrityPrompt, setIntegrityPrompt] = useState<{
     open: boolean;
@@ -193,7 +204,11 @@ const ModsModal: React.FC<{
     return dir;
   };
 
-  const loadDiscover = async (opts?: { reset?: boolean; q?: string; sort?: BrowseSort }) => {
+  const loadDiscover = async (opts?: {
+    reset?: boolean;
+    q?: string;
+    sort?: BrowseSort;
+  }) => {
     setDiscoverLoading(true);
     setDiscoverError("");
     try {
@@ -212,7 +227,10 @@ const ModsModal: React.FC<{
       if (!res?.ok) throw new Error(res?.error || "Failed to load mods");
       const mods = Array.isArray(res.mods) ? (res.mods as DiscoverMod[]) : [];
       const pagination = res.pagination ?? null;
-      const total = typeof pagination?.totalCount === "number" ? pagination.totalCount : null;
+      const total =
+        typeof pagination?.totalCount === "number"
+          ? pagination.totalCount
+          : null;
 
       setTotalCount(total);
       setPageIndex(nextIndex);
@@ -220,9 +238,7 @@ const ModsModal: React.FC<{
 
       const got = mods.length;
       const computedHasMore =
-        total != null
-          ? nextIndex + got < total
-          : got >= pageSize;
+        total != null ? nextIndex + got < total : got >= pageSize;
       setHasMore(computedHasMore);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
@@ -246,7 +262,9 @@ const ModsModal: React.FC<{
       if (!res?.ok) throw new Error(res?.error || "Failed to load mod details");
 
       setDetailsMod(res.mod as ModDetails);
-      setDetailsFiles(Array.isArray(res.files) ? (res.files as ModFileInfo[]) : []);
+      setDetailsFiles(
+        Array.isArray(res.files) ? (res.files as ModFileInfo[]) : [],
+      );
       setDetailsHtml(sanitizeHtmlAllowImages(res.html, { maxLength: 200_000 }));
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
@@ -256,18 +274,24 @@ const ModsModal: React.FC<{
     }
   };
 
-  const loadInstalled = async () => {
-    setInstalledLoading(true);
+  const loadInstalled = async (showLoading = true) => {
+    setInstalledLoading(showLoading);
     setInstalledError("");
     try {
       const dir = await ensureGameDir();
       const res = await window.config.modsInstalledList(dir);
-      if (!res?.ok) throw new Error(res?.error || "Failed to load installed mods");
+      if (!res?.ok)
+        throw new Error(res?.error || "Failed to load installed mods");
       setModsDir(res.modsDir);
       setInstalledItems(res.items ?? []);
 
       // Keep registry best-effort consistent with actual files.
-      void loadRegistry(dir, (res.items ?? []).map((x: any) => String(x?.fileName ?? "")).filter(Boolean));
+      void loadRegistry(
+        dir,
+        (res.items ?? [])
+          .map((x: any) => String(x?.fileName ?? ""))
+          .filter(Boolean),
+      );
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
       setInstalledError(message);
@@ -278,16 +302,24 @@ const ModsModal: React.FC<{
     }
   };
 
-  const loadRegistry = async (dir?: string, knownInstalledFileNames?: string[]) => {
+  const loadRegistry = async (
+    dir?: string,
+    knownInstalledFileNames?: string[],
+  ) => {
     setRegistryError("");
     try {
       const gameDir = dir ?? (await ensureGameDir());
       const res = await window.config.modsRegistry(gameDir);
-      if (!res?.ok) throw new Error(res?.error || "Failed to load mods registry");
+      if (!res?.ok)
+        throw new Error(res?.error || "Failed to load mods registry");
 
-      const list = Array.isArray(res.items) ? (res.items as ModRegistryEntry[]) : [];
+      const list = Array.isArray(res.items)
+        ? (res.items as ModRegistryEntry[])
+        : [];
       const fileSet = new Set(
-        (knownInstalledFileNames ?? installedItems.map((x) => x.fileName)).filter(Boolean),
+        (
+          knownInstalledFileNames ?? installedItems.map((x) => x.fileName)
+        ).filter(Boolean),
       );
 
       const filtered = list.filter((x) => {
@@ -295,7 +327,11 @@ const ModsModal: React.FC<{
         if (!x.fileName) return true;
         if (fileSet.size === 0) return true;
         // installed list contains both enabled and disabled file names; registry stores the exact name we wrote.
-        return fileSet.has(x.fileName) || fileSet.has(`${x.fileName}.disabled`) || fileSet.has(x.fileName.replace(/\.disabled$/i, ""));
+        return (
+          fileSet.has(x.fileName) ||
+          fileSet.has(`${x.fileName}.disabled`) ||
+          fileSet.has(x.fileName.replace(/\.disabled$/i, ""))
+        );
       });
 
       const map: Record<number, ModRegistryEntry> = {};
@@ -319,7 +355,9 @@ const ModsModal: React.FC<{
       const dir = await ensureGameDir();
       const res = await window.config.modsProfilesList(dir);
       if (!res?.ok) throw new Error(res?.error || "Failed to load profiles");
-      const list = Array.isArray(res.profiles) ? (res.profiles as ModProfile[]) : [];
+      const list = Array.isArray(res.profiles)
+        ? (res.profiles as ModProfile[])
+        : [];
       setProfiles(list);
       setSelectedProfileName((prev) => {
         if (prev && list.some((p) => p.name === prev)) return prev;
@@ -368,8 +406,14 @@ const ModsModal: React.FC<{
 
   const getSelectedGameVersionLabel = () => {
     const selected = availableVersions?.[selectedVersion];
-    if (!selected) return { type: versionType, buildIndex: undefined as number | undefined, label: "" };
-    const label = (selected.build_name?.trim() || `Build-${selected.build_index}`) as string;
+    if (!selected)
+      return {
+        type: versionType,
+        buildIndex: undefined as number | undefined,
+        label: "",
+      };
+    const label = (selected.build_name?.trim() ||
+      `Build-${selected.build_index}`) as string;
     return { type: selected.type, buildIndex: selected.build_index, label };
   };
 
@@ -390,14 +434,21 @@ const ModsModal: React.FC<{
     return sanitizeProfileName(`${root} (${Date.now() % 1000})`) || "Imported";
   };
 
-  const getPreferredInstalledFileNameForBase = (base: string): string | null => {
-    const enabled = installedItems.find((x) => baseName(x.fileName) === base && x.enabled);
+  const getPreferredInstalledFileNameForBase = (
+    base: string,
+  ): string | null => {
+    const enabled = installedItems.find(
+      (x) => baseName(x.fileName) === base && x.enabled,
+    );
     if (enabled?.fileName) return enabled.fileName;
     const any = installedItems.find((x) => baseName(x.fileName) === base);
     return any?.fileName ?? null;
   };
 
-  const awaitIntegrityDecision = (title: string, message: React.ReactNode): Promise<boolean> => {
+  const awaitIntegrityDecision = (
+    title: string,
+    message: React.ReactNode,
+  ): Promise<boolean> => {
     return new Promise((resolve) => {
       setIntegrityPrompt({ open: true, title, message, resolve });
     });
@@ -413,7 +464,10 @@ const ModsModal: React.FC<{
       const total = payload?.total != null ? Number(payload.total) : undefined;
       setDownloadProgress((prev) => ({
         ...prev,
-        [id]: { received: Math.max(0, received), total: total && total > 0 ? total : undefined },
+        [id]: {
+          received: Math.max(0, received),
+          total: total && total > 0 ? total : undefined,
+        },
       }));
     };
 
@@ -508,7 +562,9 @@ const ModsModal: React.FC<{
   }, [installedItems]);
 
   const installedBaseNames = useMemo(() => {
-    return Array.from(installedByBase.keys()).sort((a, b) => a.localeCompare(b));
+    return Array.from(installedByBase.keys()).sort((a, b) =>
+      a.localeCompare(b),
+    );
   }, [installedByBase]);
 
   const registryByBaseName = useMemo(() => {
@@ -538,7 +594,9 @@ const ModsModal: React.FC<{
     const union = new Set(profileModsUnionNames);
     setProfileModsOrder((prev) => {
       const filtered = prev.filter((x) => union.has(x));
-      const missing = profileModsUnionNames.filter((x) => !new Set(filtered).has(x));
+      const missing = profileModsUnionNames.filter(
+        (x) => !new Set(filtered).has(x),
+      );
       if (!filtered.length && !prev.length) {
         // If we have no prior order (first render), just use the union list.
         return profileModsUnionNames;
@@ -590,7 +648,11 @@ const ModsModal: React.FC<{
     const d = new Date(iso);
     if (!Number.isFinite(d.getTime())) return "";
     try {
-      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+      });
     } catch {
       return iso;
     }
@@ -599,7 +661,8 @@ const ModsModal: React.FC<{
   const getInstallStatus = (modId: number, latestFileId?: number) => {
     const entry = registryByModId[modId];
     if (!entry) return { state: "install" as const };
-    const installedFileId = typeof entry.fileId === "number" ? entry.fileId : undefined;
+    const installedFileId =
+      typeof entry.fileId === "number" ? entry.fileId : undefined;
     if (installedFileId && latestFileId && installedFileId !== latestFileId) {
       return { state: "update" as const };
     }
@@ -641,7 +704,10 @@ const ModsModal: React.FC<{
                 <IconX size={18} />
               </button>
 
-              <div className="max-w-[92vw] max-h-[88vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+              <div
+                className="max-w-[92vw] max-h-[88vh] overflow-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <img
                   src={imageViewer.src}
                   alt={imageViewer.alt || "Image"}
@@ -654,8 +720,12 @@ const ModsModal: React.FC<{
                     imageViewer.zoomed
                       ? {
                           // Real zoom: increase the rendered dimensions so scroll can reach edges.
-                          width: imageViewerZoomDims ? `${imageViewerZoomDims.w}px` : "184vw",
-                          height: imageViewerZoomDims ? `${imageViewerZoomDims.h}px` : "auto",
+                          width: imageViewerZoomDims
+                            ? `${imageViewerZoomDims.w}px`
+                            : "184vw",
+                          height: imageViewerZoomDims
+                            ? `${imageViewerZoomDims.h}px`
+                            : "auto",
                           maxWidth: "none",
                           maxHeight: "none",
                           objectFit: "contain",
@@ -672,9 +742,13 @@ const ModsModal: React.FC<{
                   onClick={() => {
                     setImageViewer((v) => {
                       if (!v.zoomed) {
-                        const rect = imageViewerImgRef.current?.getBoundingClientRect();
+                        const rect =
+                          imageViewerImgRef.current?.getBoundingClientRect();
                         if (rect && rect.width > 0 && rect.height > 0) {
-                          setImageViewerZoomDims({ w: Math.round(rect.width * 2), h: Math.round(rect.height * 2) });
+                          setImageViewerZoomDims({
+                            w: Math.round(rect.width * 2),
+                            h: Math.round(rect.height * 2),
+                          });
                         } else {
                           setImageViewerZoomDims(null);
                         }
@@ -713,7 +787,9 @@ const ModsModal: React.FC<{
         </button>
 
         <div className="flex items-center justify-between gap-3 mb-4 pr-12">
-          <h2 className="text-lg font-semibold text-white tracking-wide">{t("modsModal.title")}</h2>
+          <h2 className="text-lg font-semibold text-white tracking-wide">
+            {t("modsModal.title")}
+          </h2>
 
           <div className="flex items-center gap-2">
             <button
@@ -751,7 +827,12 @@ const ModsModal: React.FC<{
         </div>
 
         {/* Profiles gets its own inner scroll containers so Apply/Delete don't vanish into the void. */}
-        <div className={cn("flex-1 min-h-0 pr-2", tab !== "profiles" && "overflow-y-auto")}>
+        <div
+          className={cn(
+            "flex-1 min-h-0 pr-2",
+            tab !== "profiles" && "overflow-y-auto",
+          )}
+        >
           {tab === "discover" ? (
             <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-3">
               <div className="flex items-center gap-2 mb-3">
@@ -786,7 +867,11 @@ const ModsModal: React.FC<{
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
-                        void loadDiscover({ reset: true, q: query.trim(), sort });
+                        void loadDiscover({
+                          reset: true,
+                          q: query.trim(),
+                          sort,
+                        });
                         setDetailsId(null);
                       }
                     }}
@@ -802,16 +887,30 @@ const ModsModal: React.FC<{
                     const next = e.target.value as BrowseSort;
                     setSort(next);
                     setDetailsId(null);
-                    void loadDiscover({ reset: true, q: query.trim(), sort: next });
+                    void loadDiscover({
+                      reset: true,
+                      q: query.trim(),
+                      sort: next,
+                    });
                   }}
                   className="px-3 py-2 rounded-lg bg-[#141824]/80 border border-[#2a3146] text-white text-sm outline-none focus:border-blue-400/60"
                   title={t("common.sortBy")}
                 >
-                  <option value="relevance">{t("modsModal.sort.relevance")}</option>
-                  <option value="popularity">{t("modsModal.sort.popularity")}</option>
-                  <option value="latestUpdate">{t("modsModal.sort.latestUpdate")}</option>
-                  <option value="creationDate">{t("modsModal.sort.creationDate")}</option>
-                  <option value="totalDownloads">{t("modsModal.sort.totalDownloads")}</option>
+                  <option value="relevance">
+                    {t("modsModal.sort.relevance")}
+                  </option>
+                  <option value="popularity">
+                    {t("modsModal.sort.popularity")}
+                  </option>
+                  <option value="latestUpdate">
+                    {t("modsModal.sort.latestUpdate")}
+                  </option>
+                  <option value="creationDate">
+                    {t("modsModal.sort.creationDate")}
+                  </option>
+                  <option value="totalDownloads">
+                    {t("modsModal.sort.totalDownloads")}
+                  </option>
                   <option value="az">{t("modsModal.sort.az")}</option>
                 </select>
 
@@ -857,11 +956,15 @@ const ModsModal: React.FC<{
               {detailsId != null ? (
                 <div className="rounded-lg border border-[#2a3146] bg-[#141824]/60 p-3">
                   {detailsError ? (
-                    <div className="text-xs text-red-300 mb-2">{detailsError}</div>
+                    <div className="text-xs text-red-300 mb-2">
+                      {detailsError}
+                    </div>
                   ) : null}
 
                   {detailsLoading && !detailsMod ? (
-                    <div className="text-xs text-gray-300">{t("modsModal.details.loadingDetails")}</div>
+                    <div className="text-xs text-gray-300">
+                      {t("modsModal.details.loadingDetails")}
+                    </div>
                   ) : detailsMod ? (
                     <div className="flex flex-col gap-3">
                       <div className="flex items-start justify-between gap-3">
@@ -904,9 +1007,13 @@ const ModsModal: React.FC<{
                         <div className="flex flex-col items-end gap-2">
                           {(() => {
                             const stableId =
-                              detailsFiles.find((f) => Number(f?.releaseType) === 1)?.id ??
-                              detailsFiles?.[0]?.id;
-                            const status = getInstallStatus(detailsMod.id, stableId).state;
+                              detailsFiles.find(
+                                (f) => Number(f?.releaseType) === 1,
+                              )?.id ?? detailsFiles?.[0]?.id;
+                            const status = getInstallStatus(
+                              detailsMod.id,
+                              stableId,
+                            ).state;
                             return (
                               <button
                                 type="button"
@@ -915,7 +1022,8 @@ const ModsModal: React.FC<{
                                   "bg-[linear-gradient(90deg,#0268D4_0%,#02D4D4_100%)] bg-[length:100%_100%] bg-no-repeat bg-left",
                                   "text-white text-sm font-bold",
                                   "hover:shadow-[0_0_18px_rgba(2,104,212,0.85)] transition",
-                                  (installingId === detailsMod.id || status === "installed") &&
+                                  (installingId === detailsMod.id ||
+                                    status === "installed") &&
                                     "opacity-70 cursor-not-allowed",
                                 )}
                                 onClick={() => {
@@ -925,13 +1033,19 @@ const ModsModal: React.FC<{
                                       const dir = await ensureGameDir();
                                       setInstallingId(detailsMod.id);
                                       // Default install always downloads latest stable.
-                                      await window.config.modsInstall(detailsMod.id, dir);
+                                      await window.config.modsInstall(
+                                        detailsMod.id,
+                                        dir,
+                                      );
                                     } catch {
                                       setInstallingId(null);
                                     }
                                   })();
                                 }}
-                                disabled={installingId === detailsMod.id || status === "installed"}
+                                disabled={
+                                  installingId === detailsMod.id ||
+                                  status === "installed"
+                                }
                                 title={t("modsModal.actions.install")}
                               >
                                 <span className="inline-flex items-center gap-2">
@@ -951,12 +1065,15 @@ const ModsModal: React.FC<{
                             <div className="text-[11px] text-gray-300">
                               {(() => {
                                 const p = downloadProgress[detailsMod.id];
-                                if (!p) return t("modsModal.status.downloading");
+                                if (!p)
+                                  return t("modsModal.status.downloading");
                                 const pct = p.total
                                   ? Math.floor((p.received / p.total) * 100)
                                   : null;
                                 return pct != null
-                                  ? t("modsModal.status.downloadingPct", { pct })
+                                  ? t("modsModal.status.downloadingPct", {
+                                      pct,
+                                    })
                                   : t("modsModal.status.downloadingKb", {
                                       kb: Math.floor(p.received / 1024),
                                     });
@@ -973,11 +1090,17 @@ const ModsModal: React.FC<{
                           className="w-full max-h-[220px] object-cover rounded-lg border border-white/10 bg-white/5 cursor-zoom-in"
                           loading="lazy"
                           // Clickable because users will click it anyway.
-                          onClick={() => openImageViewer(detailsMod.logoUrl!, detailsMod.name)}
+                          onClick={() =>
+                            openImageViewer(
+                              detailsMod.logoUrl!,
+                              detailsMod.name,
+                            )
+                          }
                         />
                       ) : null}
 
-                      {Array.isArray(detailsMod.screenshots) && detailsMod.screenshots.length ? (
+                      {Array.isArray(detailsMod.screenshots) &&
+                      detailsMod.screenshots.length ? (
                         <div className="grid grid-cols-3 gap-2">
                           {detailsMod.screenshots.slice(0, 6).map((s, idx) => {
                             const src = s.thumbnailUrl || s.url;
@@ -990,7 +1113,12 @@ const ModsModal: React.FC<{
                                 className="w-full h-[90px] object-cover rounded-lg border border-white/10 bg-white/5 cursor-zoom-in"
                                 loading="lazy"
                                 // Thumbnail click opens the full image. Revolutionary.
-                                onClick={() => openImageViewer(s.url || src, s.title || `Screenshot ${idx + 1}`)}
+                                onClick={() =>
+                                  openImageViewer(
+                                    s.url || src,
+                                    s.title || `Screenshot ${idx + 1}`,
+                                  )
+                                }
                               />
                             );
                           })}
@@ -1002,7 +1130,9 @@ const ModsModal: React.FC<{
                           {t("modsModal.details.description")}
                         </div>
                         {detailsLoading && !detailsHtml ? (
-                          <div className="text-xs text-gray-100">{t("modsModal.details.loadingDescription")}</div>
+                          <div className="text-xs text-gray-100">
+                            {t("modsModal.details.loadingDescription")}
+                          </div>
                         ) : detailsHtml ? (
                           <div
                             className={cn(
@@ -1027,14 +1157,20 @@ const ModsModal: React.FC<{
                             dangerouslySetInnerHTML={{ __html: detailsHtml }}
                           />
                         ) : (
-                          <div className="text-xs text-gray-200">{t("modsModal.details.noDescription")}</div>
+                          <div className="text-xs text-gray-200">
+                            {t("modsModal.details.noDescription")}
+                          </div>
                         )}
                       </div>
 
                       <div className="rounded-lg border border-[#2a3146] bg-[#0f1422]/70 p-3">
-                        <div className="text-sm text-white font-semibold mb-2">{t("modsModal.details.files")}</div>
+                        <div className="text-sm text-white font-semibold mb-2">
+                          {t("modsModal.details.files")}
+                        </div>
                         {detailsLoading && !detailsFiles.length ? (
-                          <div className="text-xs text-gray-300">{t("modsModal.details.loadingFiles")}</div>
+                          <div className="text-xs text-gray-300">
+                            {t("modsModal.details.loadingFiles")}
+                          </div>
                         ) : detailsFiles.length ? (
                           <div className="space-y-2">
                             {detailsFiles.slice(0, 20).map((f) => (
@@ -1044,7 +1180,9 @@ const ModsModal: React.FC<{
                               >
                                 <div className="min-w-0">
                                   <div className="text-xs text-white font-semibold truncate">
-                                    {f.displayName || f.fileName || `File #${f.id}`}
+                                    {f.displayName ||
+                                      f.fileName ||
+                                      `File #${f.id}`}
                                   </div>
                                   <div className="text-[11px] text-gray-400 mt-0.5">
                                     {f.fileDate
@@ -1078,7 +1216,8 @@ const ModsModal: React.FC<{
                                       </span>
                                     ) : null}
 
-                                    {Array.isArray(f.gameVersions) && f.gameVersions.length ? (
+                                    {Array.isArray(f.gameVersions) &&
+                                    f.gameVersions.length ? (
                                       <span className="text-gray-200 line-clamp-1">
                                         {f.gameVersions.slice(0, 6).join(", ")}
                                       </span>
@@ -1088,9 +1227,15 @@ const ModsModal: React.FC<{
 
                                 <div className="shrink-0 flex flex-col items-end gap-2">
                                   {(() => {
-                                    const entry = registryByModId[detailsMod.id];
-                                    const installedFileId = typeof entry?.fileId === "number" ? entry.fileId : undefined;
-                                    const isInstalledThisFile = installedFileId != null && installedFileId === f.id;
+                                    const entry =
+                                      registryByModId[detailsMod.id];
+                                    const installedFileId =
+                                      typeof entry?.fileId === "number"
+                                        ? entry.fileId
+                                        : undefined;
+                                    const isInstalledThisFile =
+                                      installedFileId != null &&
+                                      installedFileId === f.id;
                                     return (
                                       <button
                                         type="button"
@@ -1099,23 +1244,33 @@ const ModsModal: React.FC<{
                                           "bg-[linear-gradient(90deg,#0268D4_0%,#02D4D4_100%)] bg-[length:100%_100%] bg-no-repeat bg-left",
                                           "text-white text-xs font-bold",
                                           "hover:shadow-[0_0_18px_rgba(2,104,212,0.85)] transition",
-                                          (installingId === detailsMod.id || isInstalledThisFile) &&
+                                          (installingId === detailsMod.id ||
+                                            isInstalledThisFile) &&
                                             "opacity-70 cursor-not-allowed",
                                         )}
-                                        disabled={installingId === detailsMod.id || isInstalledThisFile}
+                                        disabled={
+                                          installingId === detailsMod.id ||
+                                          isInstalledThisFile
+                                        }
                                         onClick={() => {
                                           if (isInstalledThisFile) return;
                                           void (async () => {
                                             try {
                                               const dir = await ensureGameDir();
                                               setInstallingId(detailsMod.id);
-                                              await window.config.modsInstallFile(detailsMod.id, f.id, dir);
+                                              await window.config.modsInstallFile(
+                                                detailsMod.id,
+                                                f.id,
+                                                dir,
+                                              );
                                             } catch {
                                               setInstallingId(null);
                                             }
                                           })();
                                         }}
-                                        title={t("modsModal.details.installThisFile")}
+                                        title={t(
+                                          "modsModal.details.installThisFile",
+                                        )}
                                       >
                                         {isInstalledThisFile
                                           ? t("modsModal.actions.installed")
@@ -1128,12 +1283,16 @@ const ModsModal: React.FC<{
                             ))}
                           </div>
                         ) : (
-                          <div className="text-xs text-gray-400">{t("modsModal.details.noFilesReturned")}</div>
+                          <div className="text-xs text-gray-400">
+                            {t("modsModal.details.noFilesReturned")}
+                          </div>
                         )}
                       </div>
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-300">{t("modsModal.details.selectModForDetails")}</div>
+                    <div className="text-xs text-gray-300">
+                      {t("modsModal.details.selectModForDetails")}
+                    </div>
                   )}
                 </div>
               ) : (
@@ -1148,14 +1307,21 @@ const ModsModal: React.FC<{
 
                   <div className="pr-1">
                     {discoverLoading && !discoverMods.length ? (
-                      <div className="text-xs text-gray-100">{t("common.loading")}</div>
+                      <div className="text-xs text-gray-100">
+                        {t("common.loading")}
+                      </div>
                     ) : discoverMods.length ? (
                       <div className="grid grid-cols-3 gap-3">
                         {discoverMods.map((m) => {
                           const installing = installingId === m.id;
                           const p = downloadProgress[m.id];
-                          const pct = p?.total ? Math.floor((p.received / p.total) * 100) : null;
-                          const status = getInstallStatus(m.id, m.latestFileId).state;
+                          const pct = p?.total
+                            ? Math.floor((p.received / p.total) * 100)
+                            : null;
+                          const status = getInstallStatus(
+                            m.id,
+                            m.latestFileId,
+                          ).state;
                           const actionLabel =
                             status === "installed"
                               ? t("modsModal.actions.installed")
@@ -1185,7 +1351,9 @@ const ModsModal: React.FC<{
                                     className="w-12 h-12 rounded-lg object-cover border border-white/10 bg-white/5 shrink-0"
                                     loading="lazy"
                                     onError={(e) => {
-                                      (e.currentTarget as HTMLImageElement).style.display = "none";
+                                      (
+                                        e.currentTarget as HTMLImageElement
+                                      ).style.display = "none";
                                     }}
                                   />
                                 ) : (
@@ -1201,7 +1369,9 @@ const ModsModal: React.FC<{
                                   </div>
                                   <div className="text-[10px] text-gray-200 mt-1 line-clamp-1">
                                     {m.author}
-                                    {m.latestVersionName ? ` • ${m.latestVersionName}` : ""}
+                                    {m.latestVersionName
+                                      ? ` • ${m.latestVersionName}`
+                                      : ""}
                                   </div>
                                 </div>
                               </div>
@@ -1214,9 +1384,12 @@ const ModsModal: React.FC<{
                                       })
                                     : ""}
                                   {m.dateModified
-                                    ? ` • ${t("modsModal.details.updatedShort", {
-                                        date: formatDate(m.dateModified),
-                                      })}`
+                                    ? ` • ${t(
+                                        "modsModal.details.updatedShort",
+                                        {
+                                          date: formatDate(m.dateModified),
+                                        },
+                                      )}`
                                     : ""}
                                 </div>
 
@@ -1227,7 +1400,8 @@ const ModsModal: React.FC<{
                                     "bg-[linear-gradient(90deg,#0268D4_0%,#02D4D4_100%)] bg-[length:100%_100%] bg-no-repeat bg-left",
                                     "text-white text-xs font-bold",
                                     "hover:shadow-[0_0_18px_rgba(2,104,212,0.85)] transition",
-                                    (installing || status === "installed") && "opacity-70 cursor-not-allowed",
+                                    (installing || status === "installed") &&
+                                      "opacity-70 cursor-not-allowed",
                                   )}
                                   onClick={(e) => {
                                     e.preventDefault();
@@ -1237,23 +1411,32 @@ const ModsModal: React.FC<{
                                       try {
                                         const dir = await ensureGameDir();
                                         setInstallingId(m.id);
-                                        await window.config.modsInstall(m.id, dir);
+                                        await window.config.modsInstall(
+                                          m.id,
+                                          dir,
+                                        );
                                       } catch {
                                         setInstallingId(null);
                                       }
                                     })();
                                   }}
-                                  disabled={installing || status === "installed"}
+                                  disabled={
+                                    installing || status === "installed"
+                                  }
                                   title={t("modsModal.actions.install")}
                                 >
-                                  {installing ? t("modsModal.status.installing") : actionLabel}
+                                  {installing
+                                    ? t("modsModal.status.installing")
+                                    : actionLabel}
                                 </button>
                               </div>
 
                               {installing ? (
                                 <div className="text-[10px] text-gray-300">
                                   {pct != null
-                                    ? t("modsModal.status.downloadingPct", { pct })
+                                    ? t("modsModal.status.downloadingPct", {
+                                        pct,
+                                      })
                                     : t("modsModal.status.downloading")}
                                 </div>
                               ) : null}
@@ -1262,7 +1445,9 @@ const ModsModal: React.FC<{
                         })}
                       </div>
                     ) : (
-                      <div className="text-xs text-gray-100">{t("modsModal.noModsFound")}</div>
+                      <div className="text-xs text-gray-100">
+                        {t("modsModal.noModsFound")}
+                      </div>
                     )}
                   </div>
 
@@ -1270,7 +1455,9 @@ const ModsModal: React.FC<{
                     <div className="text-[11px] text-gray-400">
                       {totalCount != null
                         ? t("modsModal.details.loadedOf", {
-                            loaded: formatNumber(Math.min(discoverMods.length, totalCount)),
+                            loaded: formatNumber(
+                              Math.min(discoverMods.length, totalCount),
+                            ),
                             total: formatNumber(totalCount),
                           })
                         : discoverMods.length
@@ -1284,7 +1471,8 @@ const ModsModal: React.FC<{
                       className={cn(
                         "px-3 py-2 rounded-lg border border-[#2a3146]",
                         "bg-[#23293a] hover:bg-[#2f3650] text-white transition flex items-center gap-2",
-                        (!hasMore || discoverLoading) && "opacity-60 cursor-not-allowed",
+                        (!hasMore || discoverLoading) &&
+                          "opacity-60 cursor-not-allowed",
                       )}
                       onClick={() => void loadDiscover({ reset: false })}
                       disabled={!hasMore || discoverLoading}
@@ -1301,7 +1489,9 @@ const ModsModal: React.FC<{
             <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-4">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
-                  <div className="text-sm text-white font-semibold">{t("modsModal.installedMods")}</div>
+                  <div className="text-sm text-white font-semibold">
+                    {t("modsModal.installedMods")}
+                  </div>
                   <div className="text-[11px] text-gray-400 break-all">
                     {modsDir || ""}
                   </div>
@@ -1382,12 +1572,16 @@ const ModsModal: React.FC<{
               </div>
 
               {installedError ? (
-                <div className="text-xs text-red-300 mb-2">{installedError}</div>
+                <div className="text-xs text-red-300 mb-2">
+                  {installedError}
+                </div>
               ) : null}
 
               <div className="pr-1 rounded-lg border border-[#2a3146] bg-[#141824]/60">
                 {installedLoading ? (
-                  <div className="p-3 text-xs text-gray-100">{t("common.loading")}</div>
+                  <div className="p-3 text-xs text-gray-100">
+                    {t("common.loading")}
+                  </div>
                 ) : installedItems.length ? (
                   installedItems.map((it) => (
                     <div
@@ -1395,9 +1589,18 @@ const ModsModal: React.FC<{
                       className="flex items-center justify-between gap-3 px-3 py-2 border-b border-white/5"
                     >
                       <div className="min-w-0">
-                        <div className="text-xs text-white truncate">{it.fileName}</div>
-                        <div className={cn("text-[10px]", it.enabled ? "text-green-300" : "text-gray-400")}>
-                          {it.enabled ? t("common.enabled") : t("common.disabled")}
+                        <div className="text-xs text-white truncate">
+                          {it.fileName}
+                        </div>
+                        <div
+                          className={cn(
+                            "text-[10px]",
+                            it.enabled ? "text-green-300" : "text-gray-400",
+                          )}
+                        >
+                          {it.enabled
+                            ? t("common.enabled")
+                            : t("common.disabled")}
                         </div>
                       </div>
 
@@ -1415,8 +1618,11 @@ const ModsModal: React.FC<{
                             void (async () => {
                               try {
                                 const dir = await ensureGameDir();
-                                await window.config.modsInstalledToggle(dir, it.fileName);
-                                await loadInstalled();
+                                await window.config.modsInstalledToggle(
+                                  dir,
+                                  it.fileName,
+                                );
+                                await loadInstalled(false);
                               } catch {
                                 // ignore
                               }
@@ -1424,7 +1630,9 @@ const ModsModal: React.FC<{
                           }}
                           title={t("common.toggle")}
                         >
-                          {it.enabled ? t("common.disable") : t("common.enable")}
+                          {it.enabled
+                            ? t("common.disable")
+                            : t("common.enable")}
                         </button>
 
                         <button
@@ -1434,8 +1642,11 @@ const ModsModal: React.FC<{
                             void (async () => {
                               try {
                                 const dir = await ensureGameDir();
-                                await window.config.modsInstalledDelete(dir, it.fileName);
-                                await loadInstalled();
+                                await window.config.modsInstalledDelete(
+                                  dir,
+                                  it.fileName,
+                                );
+                                await loadInstalled(false);
                               } catch {
                                 // ignore
                               }
@@ -1449,14 +1660,18 @@ const ModsModal: React.FC<{
                     </div>
                   ))
                 ) : (
-                  <div className="p-3 text-xs text-gray-300">{t("modsModal.noInstalledModsFound")}</div>
+                  <div className="p-3 text-xs text-gray-300">
+                    {t("modsModal.noInstalledModsFound")}
+                  </div>
                 )}
               </div>
             </div>
           ) : (
             <div className="grid grid-cols-[260px_1fr] gap-4 min-h-0 h-full">
               <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-3 flex flex-col min-h-0">
-                <div className="text-sm text-white font-semibold mb-2">{t("modsModal.profiles.title")}</div>
+                <div className="text-sm text-white font-semibold mb-2">
+                  {t("modsModal.profiles.title")}
+                </div>
 
                 <div className="flex items-center gap-2 mb-3">
                   <input
@@ -1480,23 +1695,43 @@ const ModsModal: React.FC<{
                           const name = profileNameInput.trim();
                           if (!name) return;
                           const fallbackMods =
-                            profiles.find((p) => p.name === selectedProfileName)?.mods ?? [];
+                            profiles.find((p) => p.name === selectedProfileName)
+                              ?.mods ?? [];
                           const modsToSave =
                             profileSelectedMods.size > 0
                               ? Array.from(profileSelectedMods)
-                              // If state is empty, we pretend it's intentional and copy from the selected profile.
-                              : Array.from(new Set((fallbackMods ?? []).filter(Boolean)));
+                              : // If state is empty, we pretend it's intentional and copy from the selected profile.
+                                Array.from(
+                                  new Set((fallbackMods ?? []).filter(Boolean)),
+                                );
 
-                          const cf: Record<string, { modId: number; fileId?: number }> = {};
+                          const cf: Record<
+                            string,
+                            { modId: number; fileId?: number }
+                          > = {};
                           for (const base of modsToSave) {
-                            const key = typeof base === "string" ? base.trim().toLowerCase() : "";
+                            const key =
+                              typeof base === "string"
+                                ? base.trim().toLowerCase()
+                                : "";
                             if (!key) continue;
                             // We only remember versions for things we can actually identify.
                             // Everything else gets the classic "good luck" treatment.
                             const reg = registryByBaseName.get(key) ?? null;
-                            if (!reg || typeof reg.modId !== "number" || reg.modId <= 0) continue;
-                            const entry: { modId: number; fileId?: number } = { modId: reg.modId };
-                            if (typeof reg.fileId === "number" && reg.fileId > 0) entry.fileId = reg.fileId;
+                            if (
+                              !reg ||
+                              typeof reg.modId !== "number" ||
+                              reg.modId <= 0
+                            )
+                              continue;
+                            const entry: { modId: number; fileId?: number } = {
+                              modId: reg.modId,
+                            };
+                            if (
+                              typeof reg.fileId === "number" &&
+                              reg.fileId > 0
+                            )
+                              entry.fileId = reg.fileId;
                             cf[key] = entry;
                           }
 
@@ -1509,7 +1744,8 @@ const ModsModal: React.FC<{
                           await loadProfiles();
                           setSelectedProfileName(name);
                         } catch (e) {
-                          const message = e instanceof Error ? e.message : "Unknown error";
+                          const message =
+                            e instanceof Error ? e.message : "Unknown error";
                           setProfilesError(message);
                         }
                       })();
@@ -1521,12 +1757,16 @@ const ModsModal: React.FC<{
                 </div>
 
                 {profilesError ? (
-                  <div className="text-xs text-red-300 mb-2">{profilesError}</div>
+                  <div className="text-xs text-red-300 mb-2">
+                    {profilesError}
+                  </div>
                 ) : null}
 
                 <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 rounded-lg border border-[#2a3146] bg-[#141824]/60">
                   {profilesLoading ? (
-                    <div className="p-3 text-xs text-gray-300">{t("common.loading")}</div>
+                    <div className="p-3 text-xs text-gray-300">
+                      {t("common.loading")}
+                    </div>
                   ) : profiles.length ? (
                     profiles.map((p) => {
                       const active = p.name === selectedProfileName;
@@ -1542,7 +1782,9 @@ const ModsModal: React.FC<{
                           onClick={() => {
                             // Load the profile mods immediately so the UI doesn't gaslight you with "0 mods".
                             setSelectedProfileName(p.name);
-                            const selected = new Set((p.mods ?? []).filter(Boolean));
+                            const selected = new Set(
+                              (p.mods ?? []).filter(Boolean),
+                            );
                             setProfileSelectedMods(selected);
 
                             // Only sort "selected-first" at the moment the profile is chosen.
@@ -1553,21 +1795,28 @@ const ModsModal: React.FC<{
                             names.sort((a, b) => {
                               const aSelected = selected.has(a);
                               const bSelected = selected.has(b);
-                              if (aSelected !== bSelected) return aSelected ? -1 : 1;
+                              if (aSelected !== bSelected)
+                                return aSelected ? -1 : 1;
                               return a.localeCompare(b);
                             });
                             setProfileModsOrder(names);
                           }}
                         >
-                          <div className="text-xs text-white truncate">{p.name}</div>
+                          <div className="text-xs text-white truncate">
+                            {p.name}
+                          </div>
                           <div className="text-[10px] text-gray-400">
-                            {t("modsModal.countMods", { count: p.mods?.length ?? 0 })}
+                            {t("modsModal.countMods", {
+                              count: p.mods?.length ?? 0,
+                            })}
                           </div>
                         </button>
                       );
                     })
                   ) : (
-                    <div className="p-3 text-xs text-gray-300">{t("modsModal.profiles.noProfilesYet")}</div>
+                    <div className="p-3 text-xs text-gray-300">
+                      {t("modsModal.profiles.noProfilesYet")}
+                    </div>
                   )}
                 </div>
 
@@ -1578,7 +1827,8 @@ const ModsModal: React.FC<{
                     className={cn(
                       "px-3 py-2 rounded-lg border border-[#2a3146]",
                       "bg-[#23293a] hover:bg-[#2f3650] text-white transition",
-                      (!selectedProfileName || profilesLoading) && "opacity-60 cursor-not-allowed",
+                      (!selectedProfileName || profilesLoading) &&
+                        "opacity-60 cursor-not-allowed",
                     )}
                     disabled={!selectedProfileName || profilesLoading}
                     onClick={() => {
@@ -1586,10 +1836,14 @@ const ModsModal: React.FC<{
                         try {
                           const dir = await ensureGameDir();
                           if (!selectedProfileName) return;
-                          await window.config.modsProfilesApply(dir, selectedProfileName);
+                          await window.config.modsProfilesApply(
+                            dir,
+                            selectedProfileName,
+                          );
                           await loadInstalled();
                         } catch (e) {
-                          const message = e instanceof Error ? e.message : "Unknown error";
+                          const message =
+                            e instanceof Error ? e.message : "Unknown error";
                           setProfilesError(message);
                         }
                       })();
@@ -1604,20 +1858,30 @@ const ModsModal: React.FC<{
                     className={cn(
                       "px-3 py-2 rounded-lg border border-[#2a3146]",
                       "bg-transparent hover:bg-red-500/15 text-red-300 hover:text-red-200 transition",
-                      (!selectedProfileName || profilesLoading || selectedProfileName === "Vanilla") &&
+                      (!selectedProfileName ||
+                        profilesLoading ||
+                        selectedProfileName === "Vanilla") &&
                         "opacity-60 cursor-not-allowed",
                     )}
-                    disabled={!selectedProfileName || profilesLoading || selectedProfileName === "Vanilla"}
+                    disabled={
+                      !selectedProfileName ||
+                      profilesLoading ||
+                      selectedProfileName === "Vanilla"
+                    }
                     onClick={() => {
                       void (async () => {
                         try {
                           const dir = await ensureGameDir();
                           if (!selectedProfileName) return;
-                          await window.config.modsProfilesDelete(dir, selectedProfileName);
+                          await window.config.modsProfilesDelete(
+                            dir,
+                            selectedProfileName,
+                          );
                           setSelectedProfileName("");
                           await loadProfiles();
                         } catch (e) {
-                          const message = e instanceof Error ? e.message : "Unknown error";
+                          const message =
+                            e instanceof Error ? e.message : "Unknown error";
                           setProfilesError(message);
                         }
                       })();
@@ -1627,14 +1891,24 @@ const ModsModal: React.FC<{
                   </button>
                 </div>
 
-                {importError ? <div className="text-xs text-red-300 mt-2">{importError}</div> : null}
-                {importNotice ? <div className="text-xs text-gray-200 mt-2">{importNotice}</div> : null}
+                {importError ? (
+                  <div className="text-xs text-red-300 mt-2">{importError}</div>
+                ) : null}
+                {importNotice ? (
+                  <div className="text-xs text-gray-200 mt-2">
+                    {importNotice}
+                  </div>
+                ) : null}
 
                 {importing && importCurrent ? (
                   <div className="text-[11px] text-gray-300 mt-2">
                     {(() => {
-                      const p = importCurrent.modId ? downloadProgress[importCurrent.modId] : null;
-                      const pct = p?.total ? Math.floor((p.received / p.total) * 100) : null;
+                      const p = importCurrent.modId
+                        ? downloadProgress[importCurrent.modId]
+                        : null;
+                      const pct = p?.total
+                        ? Math.floor((p.received / p.total) * 100)
+                        : null;
                       return pct != null
                         ? t("modsModal.profiles.share.importingPct", {
                             current: importCurrent.idx,
@@ -1659,7 +1933,8 @@ const ModsModal: React.FC<{
                       "bg-[linear-gradient(90deg,#0268D4_0%,#02D4D4_100%)] bg-[length:100%_100%] bg-no-repeat bg-left",
                       "text-white text-sm font-bold",
                       "hover:shadow-[0_0_18px_rgba(2,104,212,0.85)] transition",
-                      (importing || shareWorking) && "opacity-60 cursor-not-allowed",
+                      (importing || shareWorking) &&
+                        "opacity-60 cursor-not-allowed",
                     )}
                     disabled={importing || shareWorking}
                     onClick={() => {
@@ -1674,11 +1949,16 @@ const ModsModal: React.FC<{
                           setImportPreviewPack(pack);
                           setImportPreviewOpen(true);
                         } catch (e) {
-                          const code = e instanceof Error ? e.message : "unknown";
+                          const code =
+                            e instanceof Error ? e.message : "unknown";
                           if (code === "invalid_prefix") {
-                            setImportError(t("modsModal.profiles.share.invalidFormat"));
+                            setImportError(
+                              t("modsModal.profiles.share.invalidFormat"),
+                            );
                           } else {
-                            setImportError(t("modsModal.profiles.share.importFailed"));
+                            setImportError(
+                              t("modsModal.profiles.share.importFailed"),
+                            );
                           }
                         }
                       })();
@@ -1693,7 +1973,9 @@ const ModsModal: React.FC<{
               <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-3 flex flex-col min-h-0">
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <div>
-                    <div className="text-sm text-white font-semibold">{t("modsModal.profileMods")}</div>
+                    <div className="text-sm text-white font-semibold">
+                      {t("modsModal.profileMods")}
+                    </div>
                     <div className="text-[11px] text-gray-400">
                       {t("modsModal.profiles.selectedCount", {
                         count: profileSelectedMods.size,
@@ -1709,7 +1991,9 @@ const ModsModal: React.FC<{
                         "bg-[#23293a] hover:bg-[#2f3650] text-white transition",
                         installedLoading && "opacity-60 cursor-not-allowed",
                       )}
-                      onClick={() => setProfileSelectedMods(new Set(installedBaseNames))}
+                      onClick={() =>
+                        setProfileSelectedMods(new Set(installedBaseNames))
+                      }
                       disabled={installedLoading}
                       title={t("common.selectAll")}
                     >
@@ -1762,9 +2046,14 @@ const ModsModal: React.FC<{
 
                 <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 rounded-lg border border-[#2a3146] bg-[#141824]/60">
                   {installedLoading ? (
-                    <div className="p-3 text-xs text-gray-300">{t("common.loading")}</div>
+                    <div className="p-3 text-xs text-gray-300">
+                      {t("common.loading")}
+                    </div>
                   ) : profileModsUnionNames.length ? (
-                    (profileModsOrder.length ? profileModsOrder : profileModsUnionNames).map((name) => {
+                    (profileModsOrder.length
+                      ? profileModsOrder
+                      : profileModsUnionNames
+                    ).map((name) => {
                       const info = installedByBase.get(name);
                       const isInstalled = !!info;
                       const checked = profileSelectedMods.has(name);
@@ -1773,16 +2062,24 @@ const ModsModal: React.FC<{
                       const reg = registryByBaseName.get(key) ?? null;
 
                       const source =
-                        cfEntry && typeof cfEntry.modId === "number" && cfEntry.modId > 0
+                        cfEntry &&
+                        typeof cfEntry.modId === "number" &&
+                        cfEntry.modId > 0
                           ? { modId: cfEntry.modId, fileId: cfEntry.fileId }
-                          : reg && typeof reg.modId === "number" && reg.modId > 0
+                          : reg &&
+                              typeof reg.modId === "number" &&
+                              reg.modId > 0
                             ? { modId: reg.modId, fileId: reg.fileId }
                             : null;
 
                       // We prefer the profile's pinned version, because reproducibility is a luxury.
                       // Registry fallback is "whatever was installed last time".
 
-                      const canAutoInstall = !isInstalled && !!source && typeof source.modId === "number" && source.modId > 0;
+                      const canAutoInstall =
+                        !isInstalled &&
+                        !!source &&
+                        typeof source.modId === "number" &&
+                        source.modId > 0;
 
                       return (
                         <label
@@ -1790,13 +2087,17 @@ const ModsModal: React.FC<{
                           className="flex items-center justify-between gap-3 px-3 py-2 border-b border-white/5 hover:bg-white/5 transition cursor-pointer"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs text-white truncate">{name}</div>
+                            <div className="text-xs text-white truncate">
+                              {name}
+                            </div>
 
                             {isInstalled ? (
                               <div
                                 className={cn(
                                   "text-[10px]",
-                                  info?.enabled ? "text-green-300" : "text-gray-400",
+                                  info?.enabled
+                                    ? "text-green-300"
+                                    : "text-gray-400",
                                 )}
                               >
                                 {info?.enabled
@@ -1816,32 +2117,54 @@ const ModsModal: React.FC<{
                               className={cn(
                                 "px-2.5 py-1.5 rounded-lg border border-[#2a3146]",
                                 "bg-[#23293a] hover:bg-[#2f3650] text-white transition",
-                                (!canAutoInstall || shareWorking || importing || installingId != null) &&
+                                (!canAutoInstall ||
+                                  shareWorking ||
+                                  importing ||
+                                  installingId != null) &&
                                   "opacity-60 cursor-not-allowed",
                               )}
-                              disabled={!canAutoInstall || shareWorking || importing || installingId != null}
+                              disabled={
+                                !canAutoInstall ||
+                                shareWorking ||
+                                importing ||
+                                installingId != null
+                              }
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 void (async () => {
                                   if (!source) return;
                                   const modId = source.modId;
-                                  if (typeof modId !== "number" || modId <= 0) return;
+                                  if (typeof modId !== "number" || modId <= 0)
+                                    return;
                                   try {
                                     setInstalledError("");
                                     setInstalledLoading(true);
                                     setInstallingId(modId);
                                     const dir = await ensureGameDir();
-                                    if (typeof source.fileId === "number" && source.fileId > 0) {
+                                    if (
+                                      typeof source.fileId === "number" &&
+                                      source.fileId > 0
+                                    ) {
                                       // Pin the exact fileId when we can. Because "latest" is just chaos with branding.
-                                      await window.config.modsInstallFile(modId, source.fileId, dir);
+                                      await window.config.modsInstallFile(
+                                        modId,
+                                        source.fileId,
+                                        dir,
+                                      );
                                     } else {
-                                      await window.config.modsInstall(modId, dir);
+                                      await window.config.modsInstall(
+                                        modId,
+                                        dir,
+                                      );
                                     }
                                     await loadInstalled();
                                     await loadRegistry();
                                   } catch (err) {
-                                    const message = err instanceof Error ? err.message : "Unknown error";
+                                    const message =
+                                      err instanceof Error
+                                        ? err.message
+                                        : "Unknown error";
                                     setInstalledError(message);
                                   } finally {
                                     setInstalledLoading(false);
@@ -1870,7 +2193,9 @@ const ModsModal: React.FC<{
                       );
                     })
                   ) : (
-                    <div className="p-3 text-xs text-gray-300">{t("modsModal.noInstalledModsToSelect")}</div>
+                    <div className="p-3 text-xs text-gray-300">
+                      {t("modsModal.noInstalledModsToSelect")}
+                    </div>
                   )}
                 </div>
 
@@ -1884,7 +2209,8 @@ const ModsModal: React.FC<{
                     className={cn(
                       "px-2.5 py-1.5 rounded-lg border border-[#2a3146]",
                       "bg-transparent hover:bg-white/5 text-gray-200 transition",
-                      (!selectedProfileName || shareWorking || importing) && "opacity-60 cursor-not-allowed",
+                      (!selectedProfileName || shareWorking || importing) &&
+                        "opacity-60 cursor-not-allowed",
                     )}
                     disabled={!selectedProfileName || shareWorking || importing}
                     onClick={() => {
@@ -1898,14 +2224,22 @@ const ModsModal: React.FC<{
                         try {
                           const dir = await ensureGameDir();
 
-                          const profile = profiles.find((p) => p.name === selectedProfileName);
+                          const profile = profiles.find(
+                            (p) => p.name === selectedProfileName,
+                          );
                           if (!profile) throw new Error("Profile not found");
 
                           const registryItems = Object.values(registryByModId);
-                          const registryByBase = new Map<string, ModRegistryEntry>();
+                          const registryByBase = new Map<
+                            string,
+                            ModRegistryEntry
+                          >();
                           for (const it of registryItems) {
                             if (!it?.fileName) continue;
-                            registryByBase.set(baseName(it.fileName).trim().toLowerCase(), it);
+                            registryByBase.set(
+                              baseName(it.fileName).trim().toLowerCase(),
+                              it,
+                            );
                           }
 
                           const profileCf = profile.cf ?? {};
@@ -1913,27 +2247,48 @@ const ModsModal: React.FC<{
                           const gv = getSelectedGameVersionLabel();
 
                           const mods: ModPackV1["mods"] = [];
-                          for (const base of (profile.mods ?? []).filter(Boolean)) {
+                          for (const base of (profile.mods ?? []).filter(
+                            Boolean,
+                          )) {
                             const baseKey = String(base).trim().toLowerCase();
-                            const fileName = getPreferredInstalledFileNameForBase(base);
+                            const fileName =
+                              getPreferredInstalledFileNameForBase(base);
                             const reg = registryByBase.get(baseKey) ?? null;
                             const cfEntry = profileCf?.[baseKey] ?? null;
 
                             let sha256: string | undefined;
                             if (fileName) {
                               try {
-                                const h = await window.config.modsFileHash(dir, fileName);
-                                if (h?.ok && typeof h.sha256 === "string" && h.sha256) sha256 = h.sha256;
+                                const h = await window.config.modsFileHash(
+                                  dir,
+                                  fileName,
+                                );
+                                if (
+                                  h?.ok &&
+                                  typeof h.sha256 === "string" &&
+                                  h.sha256
+                                )
+                                  sha256 = h.sha256;
                               } catch {
                                 // ignore
                               }
                             }
 
-                            if (reg || (cfEntry && typeof cfEntry.modId === "number" && cfEntry.modId > 0)) {
+                            if (
+                              reg ||
+                              (cfEntry &&
+                                typeof cfEntry.modId === "number" &&
+                                cfEntry.modId > 0)
+                            ) {
                               const modId = reg?.modId ?? cfEntry.modId;
-                              const fileId = typeof reg?.fileId === "number" ? reg.fileId : cfEntry?.fileId;
+                              const fileId =
+                                typeof reg?.fileId === "number"
+                                  ? reg.fileId
+                                  : cfEntry?.fileId;
                               const fileNameFromReg =
-                                typeof reg?.fileName === "string" ? reg.fileName : undefined;
+                                typeof reg?.fileName === "string"
+                                  ? reg.fileName
+                                  : undefined;
                               mods.push({
                                 source: "curseforge",
                                 name: base,
@@ -1969,10 +2324,14 @@ const ModsModal: React.FC<{
 
                           const code = await encodeModPack(pack);
                           setExportCode(code);
-                          setShareNotice(t("modsModal.profiles.share.exportReady"));
+                          setShareNotice(
+                            t("modsModal.profiles.share.exportReady"),
+                          );
                         } catch (e) {
                           const message =
-                            e instanceof Error ? e.message : t("modsModal.status.unknownError");
+                            e instanceof Error
+                              ? e.message
+                              : t("modsModal.status.unknownError");
                           setShareError(message);
                         } finally {
                           setShareWorking(false);
@@ -1981,7 +2340,9 @@ const ModsModal: React.FC<{
                     }}
                     title={t("modsModal.profiles.share.export")}
                   >
-                    {shareWorking ? t("common.working") : t("modsModal.profiles.share.export")}
+                    {shareWorking
+                      ? t("common.working")
+                      : t("modsModal.profiles.share.export")}
                   </button>
 
                   {exportOpen ? (
@@ -2013,8 +2374,16 @@ const ModsModal: React.FC<{
                           </button>
                         </div>
 
-                        {shareError ? <div className="text-xs text-red-300 mb-2">{shareError}</div> : null}
-                        {shareNotice ? <div className="text-xs text-gray-200 mb-2">{shareNotice}</div> : null}
+                        {shareError ? (
+                          <div className="text-xs text-red-300 mb-2">
+                            {shareError}
+                          </div>
+                        ) : null}
+                        {shareNotice ? (
+                          <div className="text-xs text-gray-200 mb-2">
+                            {shareNotice}
+                          </div>
+                        ) : null}
 
                         <div className="flex items-center justify-end gap-2 mb-2">
                           <button
@@ -2022,14 +2391,17 @@ const ModsModal: React.FC<{
                             className={cn(
                               "px-3 py-2 rounded-lg border border-[#2a3146]",
                               "bg-transparent hover:bg-white/5 text-gray-200 transition",
-                              (!exportCode || shareWorking) && "opacity-60 cursor-not-allowed",
+                              (!exportCode || shareWorking) &&
+                                "opacity-60 cursor-not-allowed",
                             )}
                             disabled={!exportCode || shareWorking}
                             onClick={() => {
                               void (async () => {
                                 try {
                                   await copyToClipboard(exportCode);
-                                  setShareNotice(t("modsModal.profiles.share.copied"));
+                                  setShareNotice(
+                                    t("modsModal.profiles.share.copied"),
+                                  );
                                 } catch {
                                   // ignore
                                 }
@@ -2044,7 +2416,9 @@ const ModsModal: React.FC<{
                         <textarea
                           value={exportCode}
                           readOnly
-                          placeholder={t("modsModal.profiles.share.codePlaceholder")}
+                          placeholder={t(
+                            "modsModal.profiles.share.codePlaceholder",
+                          )}
                           className="w-full h-[74px] resize-none px-3 py-2 rounded-lg bg-[#0f1422]/70 border border-[#2a3146] text-white text-[11px] font-mono outline-none"
                         />
                       </div>
@@ -2054,7 +2428,6 @@ const ModsModal: React.FC<{
               </div>
             </div>
           )}
-
         </div>
       </div>
 
@@ -2066,7 +2439,12 @@ const ModsModal: React.FC<{
           if (!pack) return "";
           const mods = Array.isArray(pack.mods) ? pack.mods : [];
           const names = mods
-            .map((m) => (m?.name || m?.fileName || (m?.modId ? `#${m.modId}` : "")) as string)
+            .map(
+              (m) =>
+                (m?.name ||
+                  m?.fileName ||
+                  (m?.modId ? `#${m.modId}` : "")) as string,
+            )
             .filter(Boolean);
           const gvLabel = (pack.profile?.gameVersion?.label as string) || "";
           return (
@@ -2079,7 +2457,9 @@ const ModsModal: React.FC<{
                 })}
               </div>
               <div className="mt-3 text-xs text-gray-300">
-                {t("modsModal.profiles.share.previewMods", { count: names.length })}
+                {t("modsModal.profiles.share.previewMods", {
+                  count: names.length,
+                })}
               </div>
               <div className="mt-2 max-h-[180px] overflow-y-auto pr-1 rounded-lg border border-[#2a3146] bg-[#141824]/60">
                 {names.length ? (
@@ -2118,22 +2498,41 @@ const ModsModal: React.FC<{
             setImportCurrent(null);
             try {
               const dir = await ensureGameDir();
-              const profileName = makeUniqueProfileName(String(pack.profile?.name || "Imported"));
-              const mods = (Array.isArray(pack.mods) ? pack.mods : []).filter(Boolean);
-              const downloadable = mods.filter((m) => m.source === "curseforge" && typeof m.modId === "number" && m.modId > 0);
+              const profileName = makeUniqueProfileName(
+                String(pack.profile?.name || "Imported"),
+              );
+              const mods = (Array.isArray(pack.mods) ? pack.mods : []).filter(
+                Boolean,
+              );
+              const downloadable = mods.filter(
+                (m) =>
+                  m.source === "curseforge" &&
+                  typeof m.modId === "number" &&
+                  m.modId > 0,
+              );
 
               const installedBases: string[] = [];
               const errors: string[] = [];
               const manualMissing: string[] = mods
                 .filter((m) => m.requiredManual)
-                .map((m) => (m?.name || m?.fileName || (m?.modId ? `#${m.modId}` : "")) as string)
+                .map(
+                  (m) =>
+                    (m?.name ||
+                      m?.fileName ||
+                      (m?.modId ? `#${m.modId}` : "")) as string,
+                )
                 .filter(Boolean);
 
               for (let i = 0; i < downloadable.length; i++) {
                 const m = downloadable[i];
                 const modId = Number(m.modId);
                 const name = (m?.name || m?.fileName || `#${modId}`) as string;
-                setImportCurrent({ idx: i + 1, total: downloadable.length, modId, name });
+                setImportCurrent({
+                  idx: i + 1,
+                  total: downloadable.length,
+                  modId,
+                  name,
+                });
 
                 setInstallingId(modId);
                 const res =
@@ -2142,11 +2541,14 @@ const ModsModal: React.FC<{
                     : await window.config.modsInstall(modId, dir);
 
                 if (!res?.ok) {
-                  errors.push(`${name}: ${String((res as any)?.error || "Download failed")}`);
+                  errors.push(
+                    `${name}: ${String((res as any)?.error || "Download failed")}`,
+                  );
                   continue;
                 }
 
-                const fileName = typeof res.fileName === "string" ? res.fileName : "";
+                const fileName =
+                  typeof res.fileName === "string" ? res.fileName : "";
                 if (fileName) installedBases.push(baseName(fileName));
 
                 if (m.sha256 && fileName) {
@@ -2159,13 +2561,19 @@ const ModsModal: React.FC<{
                         t("modsModal.profiles.share.integrityTitle"),
                         <div>
                           <div className="text-sm text-gray-200">
-                            {t("modsModal.profiles.share.integrityMismatch", { name })}
+                            {t("modsModal.profiles.share.integrityMismatch", {
+                              name,
+                            })}
                           </div>
                           <div className="mt-2 text-[11px] text-gray-300 font-mono break-all">
-                            {t("modsModal.profiles.share.integrityExpected", { hash: expected })}
+                            {t("modsModal.profiles.share.integrityExpected", {
+                              hash: expected,
+                            })}
                           </div>
                           <div className="mt-1 text-[11px] text-gray-300 font-mono break-all">
-                            {t("modsModal.profiles.share.integrityGot", { hash: got })}
+                            {t("modsModal.profiles.share.integrityGot", {
+                              hash: got,
+                            })}
                           </div>
                         </div>,
                       );
@@ -2180,7 +2588,9 @@ const ModsModal: React.FC<{
                 }
               }
 
-              const uniqueBases = Array.from(new Set(installedBases)).filter(Boolean);
+              const uniqueBases = Array.from(new Set(installedBases)).filter(
+                Boolean,
+              );
               const cf: Record<string, { modId: number; fileId?: number }> = {};
               for (const m of downloadable) {
                 const modId = Number(m.modId);
@@ -2190,11 +2600,16 @@ const ModsModal: React.FC<{
                 const key = base.toLowerCase();
                 const entry: { modId: number; fileId?: number } = { modId };
                 const fileId = Number((m as any)?.fileId);
-                if (Number.isFinite(fileId) && fileId > 0) entry.fileId = fileId;
+                if (Number.isFinite(fileId) && fileId > 0)
+                  entry.fileId = fileId;
                 cf[key] = entry;
               }
 
-              await window.config.modsProfilesSave(dir, { name: profileName, mods: uniqueBases, cf });
+              await window.config.modsProfilesSave(dir, {
+                name: profileName,
+                mods: uniqueBases,
+                cf,
+              });
               await loadProfiles();
               setSelectedProfileName(profileName);
               setProfileSelectedMods(new Set(uniqueBases));
@@ -2217,7 +2632,11 @@ const ModsModal: React.FC<{
               }
 
               if (errors.length) {
-                setImportError(t("modsModal.profiles.share.importSomeFailed", { count: errors.length }));
+                setImportError(
+                  t("modsModal.profiles.share.importSomeFailed", {
+                    count: errors.length,
+                  }),
+                );
               }
 
               await loadInstalled();
