@@ -5,8 +5,8 @@
 <h1 align="center">Butter Launcher</h1>
 
 <p align="center">
-  <b>Experience Hytale without boundaries.</b> <br>
-  The open launcher designed for everyone: seamless no-premium online play, multiple instances, and total freedom.
+  <b>The Ultimate Hytale Experience.</b> <br>
+  Access the game your way. Managing servers, mods, and friends has never been this smooth.
 </p>
 
 <p align="center">
@@ -24,37 +24,140 @@
   </a>
 </p>
 
----
-
-## 🧈 About
-
-**Butter Launcher** is a modern, launcher for Hytale built with **Electron, React, and Vite**. 
-
-Created after the game's release in early 2026, Butter Launcher aims to provide features that the official launcher lacks, giving power back to the players. We prioritize performance and flexibility.
-
-## 📸 Screenshots
-
 <p align="center">
-  <img src="https://butterlauncher.tech/media/launcher2.png" alt="Butter Launcher Main Interface" width="100%">
+  <img src="https://butterlauncher.tech/media/launcher3.png" alt="Butter Launcher Main Interface" width="80%">
 </p>
 
-### Key Features
+---
 
-* **⚡ Multiple Instances:** Keep your versions, pre-release versions, and soon server-specific clients completely separate!
-* **🔓 Instant Access:** No official account required. Simply enter your username and play immediately.
-* **🎮 Discord Rich Presence:** Show off what you are playing, version, and elapsed time directly on your Discord profile.
-* **🚀 Modern Stack:** Built on a robust TypeScript base, ensuring a snappy and bug-free experience.
+## 🧈 Why Butter?
 
-## 🌐 Community & Support
+Butter Launcher isn't just a tool to open the game; it's a complete ecosystem designed to replace the need for file managers, external chat apps, and confusing server setups. 
 
-Join the revolution! We are building the **largest open community** for Hytale players.
+Built with **Electron, React, and Vite**, we offer a unified experience for **Premium users** (who want advanced management) and **Offline/Non-Premium users** (ensuring accessibility for everyone).
 
-Whether you have questions, want to share feedback, or just want to find people to play with (regardless of your account status), you are welcome here.
+## 💎 The Ultimate Feature Set
 
-* **💬 Discord:** [Join our Server](https://discord.gg/fZgjHwv5pA) - *The hub for the biggest offline-mode community.*
-* **🌍 Website:** [butterlauncher.tech](https://butterlauncher.tech) - *Download, news, and docs.*
-* **📸 Instagran:** [Follow us](https://instagram.com/butterlauncher_official) - *Updates, and community highlights.*
-* **🎥 Youtube:** [Subscribe](https://www.youtube.com/channel/UC4zJcaj_T71lelFtay3zL5A) - *Tutorials.*
+We've packed everything you need into one beautiful interface.
+
+### 🔓 Accessibility & Freedom
+* **Universal Access:** Full support for **Premium** accounts (Hytale accounts) and **No-Premium/Offline** mode for those who can't buy the game yet.
+* **UUID Changer:** Change your identity easily in Offline Mode.
+* **Steam Deck Ready:** A dedicated compatibility mode ensures seamless play on handheld devices.
+* **Multi-Language:** The launcher speaks your language. Choose the interface that fits you best.
+
+### ⚡ Performance & Management
+* **Smart Updates:** Stop wasting bandwidth. Our intelligent patching system downloads *only* the files that changed (saving you from redownloading 1.7GB every update).
+* **Storage Control:** Choose exactly where to install the game (perfect for managing secondary hard drives).
+* **Time Machine:** Play the latest Release, Pre-releases, or roll back to older versions instantly.
+* **News Hub:** Stay updated with the latest Hytale news and Launcher patch notes directly on your dashboard.
+
+### 🧠 In-Game Knowledge
+* **Integrated Wiki:** Stuck? Open the official Hytale Wiki inside the launcher to check items, recipes, or guides without Alt-Tabbing.
+
+### 🛠️ Next-Gen Modding (CurseForge Integrated)
+* **One-Click Install:** Browse mods by popularity, relevance, or date. View images and install versions directly.
+* **Profile Manager:** Create isolated "Modpacks" so your main world never breaks.
+* **Magic Export System:** Share your modpack with a friend using a simple **Short Code**. They paste it, and the launcher installs the *exact* mod list and versions automatically.
+* **Toggle Control:** Enable or disable specific mods at will without deleting them.
+
+### 🌍 Multiplayer & Social (Powered by Matcha!)
+* **Server Browser:** A curated list of servers, filterable by **Premium** and **No-Premium** support.
+* **Matcha! Social Network:** Add friends, chat privately, or use the **Global Chat** to find new squadmates.
+* **Activity Status:** See if your friends are online, check if they're playing, and ask to join them instantly!
+
+### 🚀 Advanced Server Hosting
+* **Hycloud Affiliate:** Get a cheap, 24/7 professionally hosted server in just a few clicks.
+* **Advanced Local Host:** For power users. Host a server on your own machine with full control:
+    * **Console Access:** View logs and execute commands in real-time.
+    * **Auth Modes:** Toggle between Authenticated, Offline, or Insecure auth.
+    * **Granular Control:** Select RAM usage, modify assets, swap Universes/Worlds, and install Early Plugins/Mods.
+
+---
+
+## 🛠️ Next-Gen Mod Management
+
+Forget dragging `.jar` files around. Butter Launcher integrates directly with **CurseForge**.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🔍 Browse & Install</h3>
+      <p>Search mods by popularity, relevance, or date. View images and descriptions without ever leaving the launcher. Toggle mods on/off with a single click.</p>
+      <img src="https://butterlauncher.tech/media/github/mods1.png" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>📦 Profiles & Modpacks</h3>
+      <p>Create isolated profiles for different gameplay styles so your main world never breaks.</p>
+      <img src="https://butterlauncher.tech/media/github/modprofiles.png" width="100%">
+    </td>
+  </tr>
+</table>
+
+### ✨ The "Magic" Sharing System
+Want to play with a friend? Don't send them a list of 50 links.
+1. Click **Export** on your profile.
+2. We generate a **Short Code** for you.
+3. Your friend clicks **Import**, pastes the code, and the launcher automatically downloads the exact mod versions you have.
+
+<p align="center">
+  <img src="https://butterlauncher.tech/media/github/modsimport.png" width="45%">
+  <img src="https://butterlauncher.tech/media/github/modsinstalled.png" width="45%">
+</p>
+
+---
+
+## 🌐 Servers & Hosting
+
+Multiplayer is the heart of Hytale. We've made it effortless to find and create worlds.
+
+### 📜 The Server List
+Stop searching forums. Our built-in browser lists the best servers, with filters to toggle between **Premium Only** and **Offline/Mixed** servers.
+<p align="center">
+  <img src="https://butterlauncher.tech/media/github/serverlist.png" width="60%">
+</p>
+
+### 💻 Host Your Own World
+We provide two powerful ways to host:
+
+1.  **Hycloud (Easy Mode):** Through our partners, get a 24/7 server with a massive discount. Setup in clicks.
+2.  **Advanced Local Host (Power User):** Run a server directly from your machine with full control:
+    * **Auth Modes:** Choose between Authenticated, Offline, or Insecure auth.
+    * **Console Access:** View logs and execute commands in real-time.
+    * **Granular Control:** Select RAM usage, modify assets, swap Universes/Worlds, and install Early Plugins/Mods.
+
+<p align="center">
+  <img src="https://butterlauncher.tech/media/github/hycloud.png" width="45%">
+  <img src="https://butterlauncher.tech/media/github/hostserver.png" width="45%">
+</p>
+
+---
+
+## 🍵 Matcha! Social Network
+
+**Matcha!** is our integrated social platform. Forget external tools—stay connected right from the launcher.
+
+* **🔗 Never Lose a Connection:** Met someone cool on a random server? Don't risk losing them forever! Just ask for their **Matcha!** handle to add them, chat, and play together later.
+* **💬 Global & Private Chat:** Meet new players in the global chat or coordinate privately with your squad.
+* **🟢 Live Status:** See if your friends are online, check if they're playing, and ask to join!
+
+<p align="center">
+  <img src="https://butterlauncher.tech/media/github/friends.png" width="45%">
+  <img src="https://butterlauncher.tech/media/github/chatf.png" width="45%">
+</p>
+
+---
+
+## 📚 Built-in Knowledge Base
+
+Stuck on a recipe? Need to know how a block works?
+The **Wiki Button** opens the official Hytale Wiki directly inside the launcher. Never Alt-Tab out of your immersion again.
+
+<p align="center">
+  <img src="https://butterlauncher.tech/media/github/wiki.png" width="60%">
+</p>
+
+---
 
 ## 📥 Installation
 
@@ -66,56 +169,27 @@ Grab the latest executable for your operating system from our **[Releases Page](
 | **Linux** | `.AppImage` / `.flatpak` | ✅ Stable |
 | **macOS** | `.dmg` | 🚧 Experimental |
 
-There is also a **[community-maintained AUR package](https://aur.archlinux.org/packages/butter-launcher-bin)** for Arch Linux.
- 
-## 🛠️ Development
+## 🤝 Contributing & Development
 
-If you want to contribute or build Butter Launcher yourself:
+We are an open community. If you know React/Electron, come build with us!
 
-### Prerequisites
-* Node.js (v18 or later)
-* npm or yarn
+1.  `git clone https://github.com/vzylev/butter-launcher.git`
+2.  `npm install`
+3.  `npm run dev`
 
-### Setup
-
-1.  **Clone the repository**
-    ```bash
-    git clone [https://github.com/vzylev/butter-launcher.git](https://github.com/vzylev/butter-launcher.git)
-    cd butter-launcher
-    ```
- 
-2.  **Install dependencies**
-    ```bash
-    npm install
-    ```
-
-3.  **Run in development mode**
-    ```bash
-    npm run dev
-    ```
-
-4.  **Build for production**
-    ```bash
-    npm run build
-    ```
-
-## 🤝 Contributing
-
-We welcome contributions!
-
-## ⚖️ Disclaimer & Legal
+## ⚖️ Disclaimer
 
 **Butter Launcher is a third-party, community-driven project.**
+We are not affiliated with, endorsed by, or associated with Hypixel Studios. "Hytale" is a trademark of Hypixel Studios.
 
-* We are **not** affiliated with, endorsed by, or associated with Hypixel Studios or Riot Games.
-* "Hytale" is a trademark of Hypixel Studios.
-* This software is provided "as is" for educational and interoperability purposes. Users are encouraged to support the official developers by purchasing the game.
-
-## 📄 License
-
-Butter Launcher is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more details.
+*We believe that culture should not be a privilege reserved for those who can afford it.* While Butter Launcher offers an "Offline Mode" to ensure accessibility for everyone, we strongly encourage those who can to support the developers by purchasing Hytale.
 
 <br>
+
+> **🕵️ Psst... hunter!**
+> There are some **Easter Eggs** hidden in the main menu. Try typing secret words... Good luck finding them! ;)
+> 
+---
 <p align="center">
-  <i>"Culture should not be a privilege reserved for those who can afford it."</i>
+  <i>Made with ❤️ for the Hytale Community.</i>
 </p>
