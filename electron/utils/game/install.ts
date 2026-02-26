@@ -1660,14 +1660,9 @@ const applyPWR = async (
   // IMPORTANT: staging dir must be unique per attempt.
   // Butler/wharf uses resume state in the staging directory; reusing a stale staging dir
   // across different .pwr files can trigger panics during Resume().
-  const stagingDir = path.join(installDir, `staging-temp-${Date.now()}`);
   if (!fs.existsSync(installDir)) {
     logger.info(`Creating install directory: ${installDir}`);
     fs.mkdirSync(installDir, { recursive: true });
-  }
-  if (!fs.existsSync(stagingDir)) {
-    logger.info(`Creating staging directory: ${stagingDir}`);
-    fs.mkdirSync(stagingDir, { recursive: true });
   }
 
   win.webContents.send("install-progress", {
@@ -1676,154 +1671,215 @@ const applyPWR = async (
     ...(stepMeta ?? {}),
   });
 
+  // Workaround: wharf/butler sometimes fails to create parent directories on Windows.
+  // If we can detect a missing-path error for a file inside installDir, create the directory and retry once.
   return new Promise<string>((resolve, reject) => {
-    let stderrBuf = "";
+    const MAX_ATTEMPTS = 2;
 
-    const stderrLogPath = path.join(stagingDir, `butler-apply-stderr-${Date.now()}.log`);
-    const stdoutLogPath = path.join(stagingDir, `butler-apply-stdout-${Date.now()}.log`);
-    let stderrLog: fs.WriteStream | null = null;
-    let stdoutLog: fs.WriteStream | null = null;
-    try {
-      stderrLog = fs.createWriteStream(stderrLogPath, { flags: "a" });
-      stdoutLog = fs.createWriteStream(stdoutLogPath, { flags: "a" });
-    } catch {
-      // ignore
-      stderrLog = null;
-      stdoutLog = null;
-    }
+    const tryCreateMissingParentDirFromStderr = (stderr: string): boolean => {
+      const s = String(stderr || "");
+      // Example:
+      // bailing out: open D:\...\Client\Data\Shared\Language\ru-RU\client.lang: The system cannot find the path specified.
+      const m = s.match(/\bopen\s+([^\r\n]+?):\s+The system cannot find the path specified\./i);
+      if (!m) return false;
+      const rawPath = String(m[1] || "").trim();
+      if (!rawPath) return false;
 
-    const butlerArgs = ["apply", "--json", "--staging-dir", stagingDir, pwrPath, installDir];
-    logger.info(`Butler command: ${butlerPath} ${butlerArgs.map((a) => JSON.stringify(a)).join(" ")}`);
+      try {
+        const absFile = path.resolve(rawPath);
+        const absRoot = path.resolve(installDir);
+        if (!absFile.toLowerCase().startsWith(absRoot.toLowerCase() + path.sep)) {
+          return false;
+        }
+        const parent = path.dirname(absFile);
+        if (!parent || parent === absRoot) return false;
+        fs.mkdirSync(parent, { recursive: true });
+        logger.info(`Created missing parent directory for Butler: ${parent}`);
+        return true;
+      } catch (e) {
+        logger.warn(
+          `Failed to create missing directory from Butler stderr: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return false;
+      }
+    };
 
-    const butlerProcess = spawn(
-      butlerPath,
-      butlerArgs,
-      {
-        windowsHide: true,
-      },
-    ).on("error", (error) => {
-      logger.error(
-        "Butler process failed to start or encountered a critical error:",
-        error,
-      );
-      const { userMessage } = formatErrorWithHints(error, {
-        op: "Run butler apply",
-        filePath: butlerPath,
-        dirPath: installDir,
+    const runAttempt = (attemptIndex: number) => {
+      const stagingDir = path.join(installDir, `staging-temp-${Date.now()}-${attemptIndex}`);
+      if (!fs.existsSync(stagingDir)) {
+        logger.info(`Creating staging directory: ${stagingDir}`);
+        fs.mkdirSync(stagingDir, { recursive: true });
+      }
+
+      let stderrBuf = "";
+
+      const stderrLogPath = path.join(stagingDir, `butler-apply-stderr-${Date.now()}.log`);
+      const stdoutLogPath = path.join(stagingDir, `butler-apply-stdout-${Date.now()}.log`);
+      let stderrLog: fs.WriteStream | null = null;
+      let stdoutLog: fs.WriteStream | null = null;
+      try {
+        stderrLog = fs.createWriteStream(stderrLogPath, { flags: "a" });
+        stdoutLog = fs.createWriteStream(stdoutLogPath, { flags: "a" });
+      } catch {
+        stderrLog = null;
+        stdoutLog = null;
+      }
+
+      const butlerArgs = ["apply", "--json", "--staging-dir", stagingDir, pwrPath, installDir];
+      logger.info(`Butler command: ${butlerPath} ${butlerArgs.map((a) => JSON.stringify(a)).join(" ")}`);
+
+      const butlerProcess = spawn(
+        butlerPath,
+        butlerArgs,
+        {
+          windowsHide: true,
+        },
+      ).on("error", (error) => {
+        logger.error(
+          "Butler process failed to start or encountered a critical error:",
+          error,
+        );
+        const { userMessage } = formatErrorWithHints(error, {
+          op: "Run butler apply",
+          filePath: butlerPath,
+          dirPath: installDir,
+        });
+        reject(new Error(userMessage));
       });
-      reject(new Error(userMessage));
-    });
 
-    // Try to surface butler progress in the UI.
-    // Butler emits JSON lines when using --json.
-    if (butlerProcess.stdout) {
-      const rl = readline.createInterface({
-        input: butlerProcess.stdout,
-        crlfDelay: Infinity,
-      });
-      rl.on("line", (line) => {
+      // Try to surface butler progress in the UI.
+      // Butler emits JSON lines when using --json.
+      if (butlerProcess.stdout) {
+        const rl = readline.createInterface({
+          input: butlerProcess.stdout,
+          crlfDelay: Infinity,
+        });
+        rl.on("line", (line) => {
+          try {
+            stdoutLog?.write(line + "\n");
+          } catch {
+            // ignore
+          }
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          try {
+            const obj = JSON.parse(trimmed);
+
+            // Common shapes seen across butler commands.
+            // We handle a few variants defensively.
+            const type = typeof obj?.type === "string" ? obj.type : "";
+            const isProgress =
+              type.toLowerCase().includes("progress") ||
+              typeof obj?.percentage === "number" ||
+              typeof obj?.percent === "number";
+
+            if (!isProgress) return;
+
+            let percent: number | undefined;
+            if (typeof obj.percentage === "number") percent = obj.percentage;
+            else if (typeof obj.percent === "number") percent = obj.percent;
+            else if (typeof obj.progress === "number") percent = obj.progress;
+
+            if (typeof percent !== "number" || Number.isNaN(percent)) return;
+            // Normalize 0..1 to 0..100
+            if (percent > 0 && percent <= 1) percent = percent * 100;
+            percent = Math.max(0, Math.min(100, percent));
+
+            win.webContents.send("install-progress", {
+              phase: "patching",
+              percent: Math.round(percent),
+              ...(stepMeta ?? {}),
+            });
+          } catch {
+            // Not JSON, ignore
+          }
+        });
+        butlerProcess.on("close", () => {
+          rl.close();
+        });
+      }
+
+      butlerProcess.stderr.on("data", (data) => {
+        const chunk = data.toString();
         try {
-          stdoutLog?.write(line + "\n");
+          stderrLog?.write(chunk);
         } catch {
           // ignore
         }
-        const trimmed = line.trim();
-        if (!trimmed) return;
+        if (stderrBuf.length < 8192) stderrBuf += chunk;
+        logger.error(`Butler stderr: ${chunk.trim()}`);
+      });
+
+      butlerProcess.on("close", (code) => {
+        logger.info(`Butler process exited with code ${code}`);
+        if (stderrLogPath) logger.info(`Butler stderr log: ${stderrLogPath}`);
+        if (stdoutLogPath) logger.info(`Butler stdout log: ${stdoutLogPath}`);
         try {
-          const obj = JSON.parse(trimmed);
-
-          // Common shapes seen across butler commands.
-          // We handle a few variants defensively.
-          const type = typeof obj?.type === "string" ? obj.type : "";
-          const isProgress =
-            type.toLowerCase().includes("progress") ||
-            typeof obj?.percentage === "number" ||
-            typeof obj?.percent === "number";
-
-          if (!isProgress) return;
-
-          let percent: number | undefined;
-          if (typeof obj.percentage === "number") percent = obj.percentage;
-          else if (typeof obj.percent === "number") percent = obj.percent;
-          else if (typeof obj.progress === "number") percent = obj.progress;
-
-          if (typeof percent !== "number" || Number.isNaN(percent)) return;
-          // Normalize 0..1 to 0..100
-          if (percent > 0 && percent <= 1) percent = percent * 100;
-          percent = Math.max(0, Math.min(100, percent));
-
-          win.webContents.send("install-progress", {
-            phase: "patching",
-            percent: Math.round(percent),
-            ...(stepMeta ?? {}),
-          });
+          stderrLog?.end();
+          stdoutLog?.end();
         } catch {
-          // Not JSON, ignore
+          // ignore
         }
-      });
-      butlerProcess.on("close", () => {
-        rl.close();
-      });
-    }
 
-    butlerProcess.stderr.on("data", (data) => {
-      const chunk = data.toString();
-      try {
-        stderrLog?.write(chunk);
-      } catch {
-        // ignore
-      }
-      // Keep a bounded snippet for error reporting
-      if (stderrBuf.length < 8192) stderrBuf += chunk;
-      logger.error(`Butler stderr: ${chunk.trim()}`);
-    });
-
-    butlerProcess.on("close", (code) => {
-      logger.info(`Butler process exited with code ${code}`);
-      if (stderrLogPath) logger.info(`Butler stderr log: ${stderrLogPath}`);
-      if (stdoutLogPath) logger.info(`Butler stdout log: ${stdoutLogPath}`);
-      try {
-        stderrLog?.end();
-        stdoutLog?.end();
-      } catch {
-        // ignore
-      }
-
-      // Force a final UI update so it doesn't stay stuck on "Downloading...".
-      win.webContents.send("install-progress", {
-        phase: "patching",
-        percent: 100,
-        ...(stepMeta ?? {}),
-      });
-
-      if (typeof code === "number" && code !== 0) {
-        const err = new Error(
-          `Butler apply failed (exit code ${code}).` +
-            (stderrBuf.trim() ? ` Stderr: ${stderrBuf.trim().slice(0, 800)}` : ""),
-        );
-        const { userMessage, meta } = formatErrorWithHints(err, {
-          op: "Apply PWR patch",
-          filePath: pwrPath,
-          dirPath: installDir,
+        win.webContents.send("install-progress", {
+          phase: "patching",
+          percent: 100,
+          ...(stepMeta ?? {}),
         });
-        logger.error("Butler apply failed", meta, err);
-        const wrapped = new Error(userMessage);
-        (wrapped as any).cause = err;
-        reject(wrapped);
-        return;
-      }
 
-      // Best-effort cleanup: staging dirs can be large.
-      try {
-        if (fs.existsSync(stagingDir)) {
-          fs.rmSync(stagingDir, { recursive: true, force: true });
+        const shouldRetry =
+          typeof code === "number" &&
+          code !== 0 &&
+          attemptIndex + 1 < MAX_ATTEMPTS &&
+          tryCreateMissingParentDirFromStderr(stderrBuf);
+
+        if (shouldRetry) {
+          logger.warn(
+            "Butler apply failed due to missing path; created directory and retrying once.",
+          );
+          // Do not reuse staging dir.
+          try {
+            if (fs.existsSync(stagingDir)) {
+              fs.rmSync(stagingDir, { recursive: true, force: true });
+            }
+          } catch {
+            // ignore
+          }
+          runAttempt(attemptIndex + 1);
+          return;
         }
-      } catch {
-        // ignore
-      }
 
-      resolve(installDir);
-    });
+        if (typeof code === "number" && code !== 0) {
+          const err = new Error(
+            `Butler apply failed (exit code ${code}).` +
+              (stderrBuf.trim() ? ` Stderr: ${stderrBuf.trim().slice(0, 800)}` : ""),
+          );
+          const { userMessage, meta } = formatErrorWithHints(err, {
+            op: "Apply PWR patch",
+            filePath: pwrPath,
+            dirPath: installDir,
+          });
+          logger.error("Butler apply failed", meta, err);
+          const wrapped = new Error(userMessage);
+          (wrapped as any).cause = err;
+          reject(wrapped);
+          return;
+        }
+
+        // Best-effort cleanup: staging dirs can be large.
+        try {
+          if (fs.existsSync(stagingDir)) {
+            fs.rmSync(stagingDir, { recursive: true, force: true });
+          }
+        } catch {
+          // ignore
+        }
+
+        resolve(installDir);
+      });
+    };
+
+    runAttempt(0);
   });
 };
 

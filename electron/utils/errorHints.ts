@@ -137,6 +137,20 @@ export const formatErrorWithHints = (err: unknown, ctx: ErrorContext) => {
     pushUnique(hints, "Antivirus can corrupt/quarantine extracted files; try temporarily disabling it.");
   }
 
+  if (
+    /butler\s+apply\s+failed/i.test(rawMessage) &&
+    /The system cannot find the path specified\./i.test(rawMessage)
+  ) {
+    pushUnique(
+      hints,
+      "A previous/seeded game install may be incomplete. Try deleting the install folder and reinstalling from scratch.",
+    );
+    pushUnique(
+      hints,
+      "Antivirus/Controlled Folder Access can block creation of some folders/files; try temporarily disabling it or using a different install directory.",
+    );
+  }
+
   const locationBits: string[] = [];
   if (ctx.url) locationBits.push(`URL: ${ctx.url}`);
   if (ctx.filePath) locationBits.push(`File: ${ctx.filePath}`);
