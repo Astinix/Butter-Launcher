@@ -683,6 +683,7 @@
       "alpha": "Alpha"
     },
     "installed": {
+      "counts": "{{downloaded}} downloaded • {{active}} active",
       "enableAll": "Enable All",
       "disableAll": "Disable All",
       "openFolder": "Open Folder",

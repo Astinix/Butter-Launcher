@@ -273,10 +273,22 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 
     const lastUuidKey = `matcha:avatar:lastUuid:${safeAccountType || "unknown"}:${username}`;
     const disabledKey = `matcha:avatar:disabled:${safeAccountType || "unknown"}:${username}`;
+    const modeKey = `matcha:avatar:mode:${safeAccountType || "unknown"}:${username}`;
 
     const sync = async () => {
       if (stopped) return;
       try {
+        const isCustomMode = (() => {
+          try {
+            return (localStorage.getItem(modeKey) || "")
+              .trim()
+              .toLowerCase() === "custom";
+          } catch {
+            return false;
+          }
+        })();
+        if (isCustomMode) return;
+
         const isDisabled = (() => {
           try {
             return (localStorage.getItem(disabledKey) || "").trim() === "1";

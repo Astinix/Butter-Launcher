@@ -89,6 +89,10 @@ const ModsModal: React.FC<{
   const { t } = useTranslation();
   const [closing, setClosing] = useState(false);
 
+  const scrollRootRef = useRef<HTMLDivElement | null>(null);
+  const discoverLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const discoverAutoLoadInFlightRef = useRef(false);
+
   const [tab, setTab] = useState<"discover" | "installed" | "profiles">(
     "discover",
   );
@@ -313,6 +317,54 @@ const ModsModal: React.FC<{
       setDiscoverLoading(false);
     }
   };
+
+  // Infinite scroll for Discover: auto-load more when reaching the bottom.
+  useEffect(() => {
+    if (!open) return;
+    if (tab !== "discover") return;
+    if (detailsId != null) return;
+    if (!hasMore) return;
+
+    const root = scrollRootRef.current;
+    const target = discoverLoadMoreSentinelRef.current;
+    if (!root || !target) return;
+
+    let disposed = false;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (disposed) return;
+        if (discoverLoading) return;
+        if (discoverAutoLoadInFlightRef.current) return;
+
+        discoverAutoLoadInFlightRef.current = true;
+        void (async () => {
+          try {
+            await loadDiscover({ reset: false });
+          } finally {
+            discoverAutoLoadInFlightRef.current = false;
+          }
+        })();
+      },
+      {
+        root,
+        // Start loading a bit before the end so it feels seamless.
+        rootMargin: "240px 0px",
+        threshold: 0.01,
+      },
+    );
+
+    obs.observe(target);
+    return () => {
+      disposed = true;
+      try {
+        obs.disconnect();
+      } catch {
+        // ignore
+      }
+    };
+  }, [open, tab, detailsId, hasMore, discoverLoading, query, sort]);
 
   useEffect(() => {
     if (sort !== "installedFirst") return;
@@ -933,6 +985,7 @@ const ModsModal: React.FC<{
             "flex-1 min-h-0 pr-2",
             tab !== "profiles" && "overflow-y-auto",
           )}
+          ref={scrollRootRef}
         >
           {tab === "discover" ? (
             <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-3">
@@ -1570,22 +1623,14 @@ const ModsModal: React.FC<{
                             })
                           : ""}
                     </div>
-                    <button
-                      type="button"
-                      className={cn(
-                        "px-3 py-2 rounded-lg border border-[#2a3146]",
-                        "bg-[#23293a] hover:bg-[#2f3650] text-white transition flex items-center gap-2",
-                        (!hasMore || discoverLoading) &&
-                          "opacity-60 cursor-not-allowed",
-                      )}
-                      onClick={() => void loadDiscover({ reset: false })}
-                      disabled={!hasMore || discoverLoading}
-                      title={t("common.loadMore")}
-                    >
-                      <IconRefresh size={18} />
-                      {t("common.loadMore")}
-                    </button>
+                    <div className="text-[11px] text-gray-400">
+                      {discoverLoading && hasMore && discoverMods.length
+                        ? t("common.loading")
+                        : ""}
+                    </div>
                   </div>
+
+                  <div ref={discoverLoadMoreSentinelRef} className="h-1 w-full" />
                 </>
               )}
             </div>
@@ -1598,6 +1643,17 @@ const ModsModal: React.FC<{
                   </div>
                   <div className="text-[11px] text-gray-400 break-all">
                     {modsDir || ""}
+                  </div>
+                  <div className="text-[11px] text-gray-400">
+                    {t("modsModal.installed.counts", {
+                      downloaded: formatNumber(installedItems.length),
+                      active: formatNumber(
+                        installedItems.reduce(
+                          (n, it) => n + (it?.enabled ? 1 : 0),
+                          0,
+                        ),
+                      ),
+                    })}
                   </div>
                 </div>
 

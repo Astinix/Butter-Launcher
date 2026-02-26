@@ -1944,6 +1944,23 @@ export default function FriendsMenu({
       }
     })();
 
+    const modeKey = `matcha:avatar:mode:${safeAccountType || "unknown"}:${user}`;
+    const storedMode = (() => {
+      try {
+        return (localStorage.getItem(modeKey) || "").trim().toLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+
+    // If the user explicitly chose a custom avatar, don't run the Hytale sync.
+    // The backend may ignore the upload, but our local hash update would still
+    // override the visible avatar after reopening Friends.
+    const effectiveMode = String(me?.avatarMode || storedMode || "")
+      .trim()
+      .toLowerCase();
+    if (effectiveMode === "custom") return;
+
     const readBgColor = () => {
       try {
         return (
@@ -2958,6 +2975,7 @@ export default function FriendsMenu({
                             const user = String(launcherUsername || "").trim();
                             const dir = String(gameDir || "").trim();
                             const bgKey = `matcha:avatar:bgColor:${safeAccountType || "unknown"}:${user}`;
+                            const modeKey = `matcha:avatar:mode:${safeAccountType || "unknown"}:${user}`;
 
                             const disabled =
                               !isSelf ||
@@ -3045,6 +3063,7 @@ export default function FriendsMenu({
                                     localStorage.removeItem(
                                       `matcha:avatar:disabled:${safeAccountType || "unknown"}:${user}`,
                                     );
+                                    if (user) localStorage.setItem(modeKey, "custom");
                                   } catch {
                                     // ignore
                                   }
@@ -3109,6 +3128,7 @@ export default function FriendsMenu({
                                       `matcha:avatar:disabled:${safeAccountType || "unknown"}:${user}`,
                                       "1",
                                     );
+                                    if (user) localStorage.setItem(modeKey, "disabled");
                                   } catch {
                                     // ignore
                                   }
@@ -3224,6 +3244,7 @@ export default function FriendsMenu({
                                       localStorage.removeItem(
                                         `matcha:avatar:disabled:${safeAccountType || "unknown"}:${user}`,
                                       );
+                                      if (user) localStorage.setItem(modeKey, "hytale");
                                     } catch {
                                       // ignore
                                     }
