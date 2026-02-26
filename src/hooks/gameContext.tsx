@@ -846,6 +846,34 @@ export const GameContextProvider = ({
   }, [gameDir, checkForUpdates]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onAccountTypeChanged = () => {
+      if (!gameDir) return;
+      void checkForUpdates("manual");
+    };
+
+    try {
+      window.addEventListener(
+        "accountType:changed",
+        onAccountTypeChanged as unknown as EventListener,
+      );
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      try {
+        window.removeEventListener(
+          "accountType:changed",
+          onAccountTypeChanged as unknown as EventListener,
+        );
+      } catch {
+        // ignore
+      }
+    };
+  }, [gameDir, checkForUpdates]);
+
+  useEffect(() => {
     if (!availableVersions.length) return;
     const selected = availableVersions[selectedVersion];
     if (!selected) return;

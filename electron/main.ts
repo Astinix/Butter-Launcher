@@ -29,7 +29,6 @@ import { genUUID } from "./utils/game/uuid";
 import {
   cancelBuildDownload,
   installGame,
-  installGameNoPremiumFull,
   installGameNoPremium,
   installGameSmart,
   installBuild1FromFolder,

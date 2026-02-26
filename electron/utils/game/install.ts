@@ -1005,6 +1005,24 @@ export const installGameNoPremium = async (
 
     let current = base;
     const stepTotal = chain.length;
+
+    const shouldFallbackToFullOnButlerMissingFile = (err: unknown): boolean => {
+      const msg =
+        err instanceof Error
+          ? err.message || ""
+          : typeof err === "string"
+            ? err
+            : (err as any)?.message
+              ? String((err as any)?.message)
+              : String(err);
+      const lower = msg.toLowerCase();
+      return (
+        lower.includes("butler apply failed") &&
+        (lower.includes("the system cannot find the file specified") ||
+          lower.includes("the system cannot find the path specified"))
+      );
+    };
+
     for (let i = 0; i < chain.length; i++) {
       const step = chain[i]!;
       if (step.from !== current) {
@@ -1050,6 +1068,17 @@ export const installGameNoPremium = async (
       } catch (e) {
         if (!shouldKeepFailedPWRs()) {
           safeUnlink(tempPWRPath);
+        }
+
+        // If a differential patch fails due to missing files/paths, the seeded base install is likely incomplete.
+        // Fallback to a full NP-FULL install (base=0) so the patch doesn't rely on existing files.
+        if (shouldFallbackToFullOnButlerMissingFile(e)) {
+          logger.warn(
+            "Differential patch failed due to missing file/path during Butler apply; falling back to full No Premium install.",
+            { from: step.from, to: step.to },
+          );
+          if (targetDirStaging) safeRmDir(targetDirStaging);
+          return await installGameNoPremiumFull(gameDir, version, win);
         }
         throw e;
       }
@@ -1680,7 +1709,9 @@ const applyPWR = async (
       const s = String(stderr || "");
       // Example:
       // bailing out: open D:\...\Client\Data\Shared\Language\ru-RU\client.lang: The system cannot find the path specified.
-      const m = s.match(/\bopen\s+([^\r\n]+?):\s+The system cannot find the path specified\./i);
+      const m = s.match(
+        /\bopen\s+([^\r\n]+?):\s+The system cannot find the (?:path|file) specified\./i,
+      );
       if (!m) return false;
       const rawPath = String(m[1] || "").trim();
       if (!rawPath) return false;

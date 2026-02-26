@@ -75,12 +75,24 @@ const Login: React.FC<{ onLogin: (username: string) => void }> = ({
     } catch {
       // ignore
     }
+
+    try {
+      window.dispatchEvent(new Event("accountType:changed"));
+    } catch {
+      // ignore
+    }
     setAccountType(next);
   };
 
   const goBackToAccountType = () => {
     try {
       localStorage.removeItem("accountType");
+    } catch {
+      // ignore
+    }
+
+    try {
+      window.dispatchEvent(new Event("accountType:changed"));
     } catch {
       // ignore
     }

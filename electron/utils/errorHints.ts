@@ -139,7 +139,7 @@ export const formatErrorWithHints = (err: unknown, ctx: ErrorContext) => {
 
   if (
     /butler\s+apply\s+failed/i.test(rawMessage) &&
-    /The system cannot find the path specified\./i.test(rawMessage)
+    /The system cannot find the (?:path|file) specified\./i.test(rawMessage)
   ) {
     pushUnique(
       hints,

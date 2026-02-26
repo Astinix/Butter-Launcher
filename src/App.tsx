@@ -248,6 +248,12 @@ export default function App() {
       } catch {
         // ignore
       }
+
+      try {
+        window.dispatchEvent(new Event("accountType:changed"));
+      } catch {
+        // ignore
+      }
     };
 
     window.ipcRenderer.on("premium:force-logout", onForceLogout);
@@ -3460,6 +3466,12 @@ export default function App() {
                   }
                   try {
                     localStorage.removeItem("accountType");
+                  } catch {
+                    // ignore
+                  }
+
+                  try {
+                    window.dispatchEvent(new Event("accountType:changed"));
                   } catch {
                     // ignore
                   }

@@ -4,7 +4,7 @@
   "author": "Butter Labs <butterlauncher@gmail.com>",
   "private": false,
   "license": "MIT",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "build_date": "ButterLauncher_02-25-2026",
   "type": "module",
   "main": "dist-electron/main.js",
