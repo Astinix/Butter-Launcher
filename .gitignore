@@ -15,6 +15,10 @@ dist-ssr
 *.local
 release
 
+# Node2 (download-only) local secrets/artifacts
+tools/node2_internal_token.txt
+tools/pwr_patches/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -244,6 +244,128 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
       window.removeEventListener("focus", update);
     };
   }, []);
+
+  // Matcha avatar sync: on launcher open + every 10 minutes (hash-gated).
+  useEffect(() => {
+    if (!username) return;
+    if (!gameDir) return;
+    if (offlineMode) return;
+
+    const token = (() => {
+      try {
+        return (localStorage.getItem("matcha:token") || "").trim();
+      } catch {
+        return "";
+      }
+    })();
+
+    if (!token) return;
+
+    let stopped = false;
+
+    const safeAccountType = (() => {
+      try {
+        return (localStorage.getItem("accountType") || "").trim();
+      } catch {
+        return "";
+      }
+    })();
+
+    const lastUuidKey = `matcha:avatar:lastUuid:${safeAccountType || "unknown"}:${username}`;
+    const disabledKey = `matcha:avatar:disabled:${safeAccountType || "unknown"}:${username}`;
+
+    const sync = async () => {
+      if (stopped) return;
+      try {
+        const isDisabled = (() => {
+          try {
+            return (localStorage.getItem(disabledKey) || "").trim() === "1";
+          } catch {
+            return false;
+          }
+        })();
+        if (isDisabled) return;
+
+        const lastUuid = (() => {
+          try {
+            return (localStorage.getItem(lastUuidKey) || "").trim();
+          } catch {
+            return "";
+          }
+        })();
+
+        const lastHash = (() => {
+          try {
+            return lastUuid
+              ? (localStorage.getItem(`matcha:avatar:lastHash:${lastUuid}`) || "").trim()
+              : "";
+          } catch {
+            return "";
+          }
+        })();
+
+        const customUUID = (() => {
+          try {
+            const raw = (localStorage.getItem("customUUID") || "").trim();
+            return raw.length ? raw : null;
+          } catch {
+            return null;
+          }
+        })();
+
+        const bgColor = (() => {
+          try {
+            return (
+              localStorage.getItem(
+                `matcha:avatar:bgColor:${safeAccountType || "unknown"}:${username}`,
+              ) || ""
+            ).trim();
+          } catch {
+            return "";
+          }
+        })();
+
+        const res = await window.config.matchaAvatarSync({
+          gameDir,
+          username,
+          token,
+          accountType: safeAccountType,
+          customUUID,
+          bgColor: bgColor || null,
+          lastHash,
+          force: false,
+        });
+        if (stopped) return;
+        if (res && res.ok) {
+          try {
+            localStorage.setItem(lastUuidKey, res.uuid);
+            localStorage.setItem(`matcha:avatar:lastHash:${res.uuid}`, res.hash);
+            localStorage.removeItem(disabledKey);
+          } catch {
+            // ignore
+          }
+        } else {
+          const err = typeof (res as any)?.error === "string" ? (res as any).error : "";
+          if (err.trim().toLowerCase() === "avatar disabled") {
+            try {
+              localStorage.setItem(disabledKey, "1");
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void sync();
+    const timer = window.setInterval(sync, 10 * 60_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [username, gameDir, offlineMode]);
   const [hostServerWarningOpen, setHostServerWarningOpen] = useState(false);
   const [hostServerWarningShownThisSession, setHostServerWarningShownThisSession] = useState(false);
   const [hostServerStage, setHostServerStage] = useState<"root" | "local">("root");
@@ -274,6 +396,7 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const [advRamMin, setAdvRamMin] = useState("");
   const [advRamMax, setAdvRamMax] = useState("");
   const [advNoAotEnabled, setAdvNoAotEnabled] = useState(false);
+  const [advCustomJvmArgs, setAdvCustomJvmArgs] = useState("");
 
   const [advAssetsEnabled, setAdvAssetsEnabled] = useState(false);
   const [advAssetsPath, setAdvAssetsPath] = useState("");
@@ -758,12 +881,14 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 
     // Emergency mode: no new downloads/installs.
     // Allow playing installed builds; manual Build-1 import is handled via a separate button.
-    if (emergencyMode && !v.installed && v.build_index !== 1) {
+    if (emergencyMode && !v.installed) {
       alert(t("launcher.errors.emergencyMode"));
       return;
     }
 
-    if (!v.installed && v.build_index === 1) {
+    // Build-1 can be installed from servers only for No Premium.
+    // Other account types still use the manual import flow.
+    if (!v.installed && v.build_index === 1 && !isNoPremium) {
       alert(t("launcher.version.manualInstallRequired"));
       return;
     }
@@ -1024,7 +1149,7 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                           ) : null}
                         </span>
 
-                        {v.build_index === 1 && !v.installed ? (
+                        {v.build_index === 1 && !v.installed && !isNoPremium ? (
                           <span className="text-[10px] text-gray-300/70">
                             {t("launcher.version.manualInstallRequired")}
                           </span>
@@ -1306,6 +1431,22 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                           </div>
                         </div>
 
+                        {/* Custom JVM Args */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-28 shrink-0 text-xs font-semibold text-gray-200">
+                            {t("hostServerModal.panel.advanced.customJvmArgs")}
+                          </div>
+                          <input
+                            value={advCustomJvmArgs}
+                            onChange={(e) => setAdvCustomJvmArgs(e.target.value)}
+                            placeholder={t("hostServerModal.panel.advanced.customJvmArgsExample")}
+                            className={cn(
+                              "flex-1 min-w-0 px-3 py-2 rounded-lg bg-[#141824]/80 border border-[#2a3146]",
+                              "text-white text-sm outline-none focus:border-blue-400/60",
+                            )}
+                          />
+                        </div>
+
                         {/* Custom Assets */}
                         <div className="flex items-center gap-2">
                           <input
@@ -1574,6 +1715,7 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                                 noAot: advNoAotEnabled,
                                 ramMinGb,
                                 ramMaxGb,
+                                customJvmArgs: advCustomJvmArgs.trim() || null,
                               })
                               .then((res) => {
                                 if (res?.ok) {
@@ -1717,6 +1859,8 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
                   onOpenTerms={() => setMatchaTermsOpen(true)}
                   openTo={friendsMenuOpenTo}
                   openToNonce={friendsMenuOpenNonce}
+                  launcherUsername={username}
+                  gameDir={gameDir}
                 />
               </div>
             </div>
@@ -2082,53 +2226,66 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
             ) : (
               availableVersions[selectedVersion]?.build_index === 1 &&
               !availableVersions[selectedVersion]?.installed ? (
-                <button
-                  type="button"
-                  className="min-w-52 bg-white/10 hover:bg-white/20 text-white/90 text-sm font-semibold px-6 py-3 rounded-lg shadow-lg text-center transition"
-                  onClick={async () => {
-                    try {
-                      if (!gameDir) {
-                        alert("Game directory not set.");
-                        return;
+                isNoPremium ? (
+                  <button
+                    className={cn(
+                      "min-w-52 bg-linear-to-r from-[#0268D4] to-[#02D4D4] text-white text-xl font-bold px-12 py-3 rounded-lg shadow-lg hover:scale-105 transition disabled:opacity-50",
+                      "animate-tinyGlow",
+                    )}
+                    onClick={handleLaunch}
+                    disabled={launching || gameLaunched}
+                  >
+                    {t("launcher.updates.install")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="min-w-52 bg-white/10 hover:bg-white/20 text-white/90 text-sm font-semibold px-6 py-3 rounded-lg shadow-lg text-center transition"
+                    onClick={async () => {
+                      try {
+                        if (!gameDir) {
+                          alert("Game directory not set.");
+                          return;
+                        }
+
+                        const picked = await window.config.pickFolder({
+                          title:
+                            availableVersions[selectedVersion]?.type === "pre-release"
+                              ? "Select Pre-release Build-1 Folder"
+                              : "Select Build-1 Folder",
+                          defaultPath: gameDir,
+                        });
+
+                        if (!picked || picked.ok === false) {
+                          const msg = (picked as any)?.error;
+                          if (typeof msg === "string" && msg.trim()) alert(msg);
+                          return;
+                        }
+
+                        const src = (picked as any)?.path;
+                        if (typeof src !== "string" || !src.trim()) {
+                          // cancelled
+                          return;
+                        }
+
+                        const channel = availableVersions[selectedVersion]?.type;
+                        window.ipcRenderer.send(
+                          "install-build1-manual",
+                          gameDir,
+                          src,
+                          channel,
+                        );
+
+                        // Best-effort refresh; main process will also trigger install-finished.
+                        void checkForUpdates("manual");
+                      } catch {
+                        alert(t("launcher.version.manualInstallRequired"));
                       }
-
-                      const picked = await window.config.pickFolder({
-                        title:
-                          availableVersions[selectedVersion]?.type === "pre-release"
-                            ? "Select Pre-release Build-1 Folder"
-                            : "Select Build-1 Folder",
-                        defaultPath: gameDir,
-                      });
-
-                      if (!picked || picked.ok === false) {
-                        const msg = (picked as any)?.error;
-                        if (typeof msg === "string" && msg.trim()) alert(msg);
-                        return;
-                      }
-
-                      const src = (picked as any)?.path;
-                      if (typeof src !== "string" || !src.trim()) {
-                        // cancelled
-                        return;
-                      }
-
-                      const channel = availableVersions[selectedVersion]?.type;
-                      window.ipcRenderer.send(
-                        "install-build1-manual",
-                        gameDir,
-                        src,
-                        channel,
-                      );
-
-                      // Best-effort refresh; main process will also trigger install-finished.
-                      void checkForUpdates("manual");
-                    } catch {
-                      alert(t("launcher.version.manualInstallRequired"));
-                    }
-                  }}
-                >
-                  {t("launcher.version.manualInstallRequired")}
-                </button>
+                    }}
+                  >
+                    {t("launcher.version.manualInstallRequired")}
+                  </button>
+                )
               ) : (
                 <button
                   className={cn(
@@ -2433,18 +2590,10 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
             className="w-[520px] max-w-[90vw] max-h-[80vh] rounded-2xl shadow-2xl bg-[#181c24f2] border border-[#23293a] p-5 animate-slideUp"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
               <div className="text-white font-extrabold text-lg leading-tight">
                 {openNews.title}
               </div>
-              <button
-                type="button"
-                className="text-gray-300 hover:text-white text-xl font-bold leading-none"
-                onClick={() => setOpenNews(null)}
-                title={t("common.close")}
-              >
-                <IconX size={20} />
-              </button>
             </div>
 
             {openNews.date && (

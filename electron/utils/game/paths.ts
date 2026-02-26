@@ -277,6 +277,43 @@ export const resolveServerPath = (installDir: string) => {
     // ignore
   }
 
+  // Windows/Linux sometimes ship the server jar under a slightly different name or location.
+  // Prefer staying inside installDir/Server to avoid expensive deep scans.
+  try {
+    const serverDir = path.join(installDir, "Server");
+    if (fs.existsSync(serverDir)) {
+      const entries = fs.readdirSync(serverDir, { withFileTypes: true });
+
+      // First: anything that looks like HytaleServer*.jar
+      for (const e of entries) {
+        if (!e.isFile()) continue;
+        if (!/\.jar$/i.test(e.name)) continue;
+        if (/^hytaleserver/i.test(e.name)) return path.join(serverDir, e.name);
+      }
+
+      // Fallback: if there's exactly one jar in Server/, use it.
+      const jars = entries
+        .filter((e) => e.isFile() && /\.jar$/i.test(e.name))
+        .map((e) => path.join(serverDir, e.name));
+      if (jars.length === 1) return jars[0]!;
+    }
+  } catch {
+    // ignore
+  }
+
+  // Last resort: look for a server jar in the install root.
+  // Keep this shallow so it doesn't become a perf trap.
+  try {
+    const rootEntries = fs.readdirSync(installDir, { withFileTypes: true });
+    for (const e of rootEntries) {
+      if (!e.isFile()) continue;
+      if (!/\.jar$/i.test(e.name)) continue;
+      if (/hytaleserver/i.test(e.name)) return path.join(installDir, e.name);
+    }
+  } catch {
+    // ignore
+  }
+
   // Some macOS bundles ship the server jar inside the app resources
   if (process.platform === "darwin") {
     const clientDir = path.join(installDir, "Client");

@@ -248,13 +248,149 @@ const getApiArch = (): "amd64" | "arm64" => {
   return "amd64";
 };
 
+const base64UrlDecodeUtf8 = (input: string): string | null => {
+  try {
+    const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = normalized.length % 4;
+    const padded = pad ? normalized + "=".repeat(4 - pad) : normalized;
+    return Buffer.from(padded, "base64").toString("utf8");
+  } catch {
+    return null;
+  }
+};
+
+const buildUpstreamPwrUrl = (opts: {
+  os: string;
+  arch: string;
+  branch: string;
+  from: number;
+  to: number;
+}): string => {
+  const os = opts.os;
+  const arch = opts.arch;
+  const branch = opts.branch;
+  const from = opts.from;
+  const to = opts.to;
+  return `https://game-patches.hytale.com/patches/${os}/${arch}/${branch}/${from}/${to}.pwr`;
+};
+
+const tryParseButterTunnelTokenPayload = (downloadUrl: string): any | null => {
+  try {
+    const u = new URL(downloadUrl);
+    // Expected: /api/patches/dl/<base64url(json)>.<hmac>
+    const m = u.pathname.match(/\/api\/patches\/dl\/([^/]+)$/);
+    if (!m) return null;
+    const tokenRaw = decodeURIComponent(m[1] ?? "");
+    const dot = tokenRaw.indexOf(".");
+    const b64 = dot === -1 ? tokenRaw : tokenRaw.slice(0, dot);
+    if (!b64) return null;
+    const jsonStr = base64UrlDecodeUtf8(b64);
+    if (!jsonStr) return null;
+    const parsed = JSON.parse(jsonStr);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const describePwrDownloadForLogs = (version: GameVersion): {
+  startLogLine: string;
+  safeUrlForMeta: string;
+} => {
+  const rawUrl = String(version.url ?? "").trim();
+  const buildName = String(version.build_name ?? "").trim() || `Build-${version.build_index}`;
+
+  const branch = version.type === "pre-release" ? "pre-release" : "release";
+  const localOs = getApiOs();
+  const localArch = getApiArch();
+
+  const fromMaybe = Number((version as any)?.pwrFrom);
+  const toMaybe = Number((version as any)?.pwrTo);
+
+  const isTunnelLike = (() => {
+    try {
+      if (!rawUrl) return false;
+      const u = new URL(rawUrl);
+      if (u.pathname.startsWith("/api/patches/dl/")) return true;
+      const host = u.hostname.toLowerCase();
+      return host.includes("butterapi") || host.includes("butter.") || host.includes("node2.");
+    } catch {
+      return false;
+    }
+  })();
+
+  // Prefer explicit step metadata if present.
+  if (Number.isFinite(fromMaybe) && Number.isFinite(toMaybe) && isTunnelLike) {
+    const upstream = buildUpstreamPwrUrl({
+      os: localOs,
+      arch: localArch,
+      branch,
+      from: fromMaybe,
+      to: toMaybe,
+    });
+    return {
+      startLogLine: `Using a ButterAPI tunnel to download ${localOs}/${localArch}/${branch} patch ${fromMaybe} -> ${toMaybe}: ${upstream}`,
+      safeUrlForMeta: upstream,
+    };
+  }
+
+  // Best-effort: decode ButterAPI tunnel token payload to recover upstream details.
+  if (isTunnelLike) {
+    const payload = rawUrl ? tryParseButterTunnelTokenPayload(rawUrl) : null;
+    const from = Number(payload?.from ?? payload?.from_version ?? payload?.fromVersion);
+    const to = Number(payload?.to ?? payload?.to_version ?? payload?.toVersion);
+    const os = typeof payload?.os === "string" ? payload.os : localOs;
+    const arch = typeof payload?.arch === "string" ? payload.arch : localArch;
+    const pBranch = typeof payload?.branch === "string" ? payload.branch : branch;
+    if (Number.isFinite(from) && Number.isFinite(to)) {
+      const upstream = buildUpstreamPwrUrl({ os, arch, branch: pBranch, from, to });
+      return {
+        startLogLine: `Using a ButterAPI tunnel to download ${os}/${arch}/${pBranch} patch ${from} -> ${to}: ${upstream}`,
+        safeUrlForMeta: upstream,
+      };
+    }
+
+    // Fail closed: never print tunnel URL.
+    return {
+      startLogLine: `Using a ButterAPI tunnel to download PWR patch for ${buildName}.`,
+      safeUrlForMeta: "(ButterAPI tunnel hidden)",
+    };
+  }
+
+  // Direct download: don't print the URL (it may still contain sensitive info).
+  return {
+    startLogLine: `Starting PWR download for version ${buildName}.`,
+    safeUrlForMeta: rawUrl ? "(direct URL hidden)" : "(no URL)",
+  };
+};
+
 const computeHmacSha256Hex = (secret: string, message: string): string => {
   return crypto.createHmac("sha256", secret).update(message).digest("hex");
+};
+
+const fetchNoPremiumClientIp = async (): Promise<string> => {
+  // Must go through the front proxy IP.
+  const url = "http://181.174.165.103/api/client/ip";
+  const res = await fetch(url, { method: "GET" });
+  if (!res.ok) {
+    const snippet = (await res.text().catch(() => "")).slice(0, 200);
+    throw new Error(
+      `Failed to fetch client ip (HTTP ${res.status})` +
+        (snippet ? `: ${snippet}` : ""),
+    );
+  }
+  const json = (await res.json()) as any;
+  const ip = typeof json?.ip === "string" ? json.ip.trim() : "";
+  if (!ip) {
+    throw new Error("Failed to fetch client ip (empty ip)");
+  }
+  return ip;
 };
 
 const fetchPatchPlanNoPremium = async (opts: {
   branch: VersionType;
   currentVersion: number;
+  targetVersion?: number;
 }): Promise<PatchStep[]> => {
   const secret = String(
     process.env.LAUNCHER_SECRET_KEY ?? __LAUNCHER_SECRET_KEY__ ?? "",
@@ -265,8 +401,9 @@ const fetchPatchPlanNoPremium = async (opts: {
     );
   }
 
+  const clientIp = await fetchNoPremiumClientIp();
   const timestamp = Date.now();
-  const message = `${opts.branch}${opts.currentVersion}${timestamp}`;
+  const message = `${opts.branch}${opts.currentVersion}${timestamp}${clientIp}`;
   const signature = computeHmacSha256Hex(secret, message);
 
   const payload = {
@@ -274,21 +411,90 @@ const fetchPatchPlanNoPremium = async (opts: {
     arch: getApiArch(),
     branch: opts.branch,
     current_version: opts.currentVersion,
+    client_ip: clientIp,
+    target_version:
+      typeof opts.targetVersion === "number" && Number.isFinite(opts.targetVersion)
+        ? opts.targetVersion
+        : undefined,
     timestamp,
     signature,
   };
 
-  const url = "https://butter.lat/api/client/get-patch";
+  // No-premium patch-plan origin (front proxy). Keep this as a plain HTTP origin when using a raw IP.
+  const url = "http://181.174.165.103/api/client/get-patch";
 
   let json: PatchPlanResponse;
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+    const makeUrlWithQuery = (baseUrl: string) => {
+      const u = new URL(baseUrl);
+      for (const [k, v] of Object.entries(payload)) {
+        if (v === undefined) continue;
+        u.searchParams.set(k, String(v));
+      }
+      return u;
+    };
+
+    const tryGet = async (baseUrl: string) => {
+      const u = makeUrlWithQuery(baseUrl);
+      const res = await fetch(u.toString(), { method: "GET" });
+      return res;
+    };
+
+    const tryPost = async () => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        // IMPORTANT: our front proxy may issue a 301 to https://butter.lat.
+        // Auto-following that redirect will turn POST into GET and drop the body.
+        redirect: "manual",
+      });
+      return res;
+    };
+
+    const followRedirect = async (res: Response) => {
+      const status = res.status;
+      if (![301, 302, 303, 307, 308].includes(status)) return null;
+      const loc = res.headers.get("location");
+      if (!loc) return null;
+
+      const nextUrl = new URL(loc, url).toString();
+
+      // 307/308 preserve method; 301/302/303 often rewrite to GET.
+      if (status === 307 || status === 308) {
+        return await fetch(nextUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      // For 301/302/303, do a GET with all parameters in query string.
+      return await tryGet(nextUrl);
+    };
+
+    let res = await tryPost();
+    const redirected = await followRedirect(res);
+    if (redirected) {
+      res = redirected;
+    }
+
+    if (!res.ok && (res.status === 404 || res.status === 400)) {
+      // If the proxy rewrote POST->GET and dropped body, backend may respond 400 Missing parameters.
+      // Fallback to GET with query params (no body) against the same base URL.
+      const text = (await res.text().catch(() => "")).slice(0, 200);
+      if (res.status === 404 || /Missing parameters/i.test(text)) {
+        res = await tryGet(url);
+      } else {
+        // Re-throw with the same snippet later.
+        throw new Error(
+          `get-patch failed (HTTP ${res.status})` + (text ? `: ${text}` : ""),
+        );
+      }
+    }
+
     if (!res.ok) {
       const snippet = (await res.text().catch(() => "")).slice(0, 200);
       throw new Error(
@@ -296,6 +502,7 @@ const fetchPatchPlanNoPremium = async (opts: {
           (snippet ? `: ${snippet}` : ""),
       );
     }
+
     json = (await res.json()) as PatchPlanResponse;
   } catch (e) {
     const { userMessage, meta } = formatErrorWithHints(e, {
@@ -548,7 +755,11 @@ const installGameFromPatchPlan = async (
       allSteps = r.steps;
       premiumHeaders = r.headers;
     } else {
-      allSteps = await fetchPatchPlanNoPremium({ branch: version.type, currentVersion: base });
+      allSteps = await fetchPatchPlanNoPremium({
+        branch: version.type,
+        currentVersion: base,
+        targetVersion: target,
+      });
     }
 
     const chain = buildPatchChainToTarget(allSteps, base, target);
@@ -592,6 +803,8 @@ const installGameFromPatchPlan = async (
       };
       (stepVersion as any).pwrHead = step.pwrHead;
       (stepVersion as any).sig = step.sig;
+      (stepVersion as any).pwrFrom = step.from;
+      (stepVersion as any).pwrTo = step.to;
 
       sanitizeSeededInstallDirForSmartPatch(installDirStaging);
 
@@ -692,6 +905,13 @@ export const installGameNoPremium = async (
 
     const target = version.build_index;
 
+    // Build-1 is the bootstrap build. Allow installing it directly from servers.
+    // The regular NO-PREMIUM installer expects an installed base build (client+server) to seed from,
+    // which doesn't exist for a fresh install. NP-FULL uses base=0 and can bootstrap from empty.
+    if (target === 1) {
+      return await installGameNoPremiumFull(gameDir, version, win);
+    }
+
     // Policy time: No Premium must have Build-1 installed before anything else.
     // Build-1 itself is allowed, because we still want *someone* to be able to install something.
     if (target !== 1) {
@@ -744,12 +964,23 @@ export const installGameNoPremium = async (
       );
     }
 
-    const allSteps = await fetchPatchPlanNoPremium({
-      branch: version.type,
-      currentVersion: base,
-    });
+    let chain: PatchStep[];
+    try {
+      const allSteps = await fetchPatchPlanNoPremium({
+        branch: version.type,
+        currentVersion: base,
+        targetVersion: target,
+      });
 
-    const chain = buildPatchChainToTarget(allSteps, base, target);
+      chain = buildPatchChainToTarget(allSteps, base, target);
+    } catch (e) {
+      // Compatibility: some servers only have 0->latest full PWRs.
+      // If the target is latest and we can't build an incremental chain, fall back to a full install.
+      if (version.isLatest) {
+        return await installGameNoPremiumFull(gameDir, version, win);
+      }
+      throw e;
+    }
 
     // Always work in a staging dir so failures never corrupt an existing install.
     safeRmDir(targetDirStaging);
@@ -795,6 +1026,8 @@ export const installGameNoPremium = async (
       // Carry integrity metadata through (used by downloadPWR best-effort checks).
       (stepVersion as any).pwrHead = step.pwrHead;
       (stepVersion as any).sig = step.sig;
+      (stepVersion as any).pwrFrom = step.from;
+      (stepVersion as any).pwrTo = step.to;
 
       // Smart-install semantics: ensure the working tree is pristine-ish before each apply.
       // (Important if the base build had online patch artifacts or if a previous step was interrupted.)
@@ -871,6 +1104,365 @@ const ensureClientExecutable = (installDir: string) => {
   }
 };
 
+const parseContentRangeTotal = (contentRange: string | null): number | null => {
+  // Example: "bytes 0-0/12345"
+  if (!contentRange) return null;
+  const m = String(contentRange).match(/\bbytes\s+\d+\s*-\s*\d+\s*\/\s*(\d+)\s*$/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+};
+
+const getNoPremiumParallelPwrConnections = (): number => {
+  // Hard cap at 2 so the client cannot overload the backend with many parallel Range requests.
+  const raw = String(process.env.BUTTER_PWR_PARALLEL_CONNECTIONS ?? "2").trim();
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return 2;
+  return Math.max(1, Math.min(2, n));
+};
+
+const MIN_PARALLEL_PWR_BYTES = 256 * 1024 * 1024; // 256MB
+
+const preallocateFile = (filePath: string, sizeBytes: number) => {
+  const fd = fs.openSync(filePath, "w");
+  try {
+    fs.ftruncateSync(fd, sizeBytes);
+  } finally {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // ignore
+    }
+  }
+};
+
+class RangeUnsupportedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RangeUnsupportedError";
+  }
+}
+
+const downloadPwrSingle = async (opts: {
+  url: string;
+  logUrl?: string;
+  tempPath: string;
+  win: BrowserWindow;
+  controller: AbortController;
+  stepMeta?: { stepIndex: number; stepTotal: number };
+  extraHeaders?: Record<string, string>;
+  buildName: string;
+}) => {
+  const { url, logUrl, tempPath, win, controller, stepMeta, extraHeaders, buildName } = opts;
+
+  const startedAt = Date.now();
+  const response = await fetch(url, {
+    signal: controller.signal,
+    headers: extraHeaders,
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  }
+  if (!response.body) throw new Error("No response body");
+
+  const contentType = response.headers.get("content-type") || undefined;
+  const contentEncoding = response.headers.get("content-encoding") || undefined;
+  const etag = response.headers.get("etag") || undefined;
+  const lastModified = response.headers.get("last-modified") || undefined;
+  const acceptRanges = response.headers.get("accept-ranges") || undefined;
+
+  const contentLength = response.headers.get("content-length");
+  const totalLength = contentLength ? parseInt(contentLength, 10) : undefined;
+  let downloadedLength = 0;
+
+  logger.info(
+    `PWR size: ${totalLength ? (totalLength / 1024 / 1024).toFixed(2) + " MB" : "unknown"}`,
+  );
+  logger.info(
+    `PWR headers: content-type=${contentType ?? "unknown"} content-encoding=${contentEncoding ?? "none"} etag=${etag ?? "none"} last-modified=${lastModified ?? "none"} accept-ranges=${acceptRanges ?? "unknown"}`,
+  );
+
+  // Emit a start event so UI doesn't show 0/0.
+  win.webContents.send("install-progress", {
+    phase: "pwr-download",
+    percent: totalLength ? 0 : -1,
+    total: totalLength,
+    current: 0,
+    ...(stepMeta ?? {}),
+  });
+
+  const progressStream = new stream.PassThrough();
+  const progressIntervalMs = 200;
+  let lastProgressAt = 0;
+  const emitProgress = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastProgressAt < progressIntervalMs) return;
+    lastProgressAt = now;
+
+    const percent =
+      typeof totalLength === "number" && totalLength > 0
+        ? Math.round((downloadedLength / totalLength) * 100)
+        : -1;
+
+    win.webContents.send("install-progress", {
+      phase: "pwr-download",
+      percent,
+      total: totalLength,
+      current: downloadedLength,
+      ...(stepMeta ?? {}),
+    });
+  };
+
+  progressStream.on("data", (chunk) => {
+    downloadedLength += chunk.length;
+    emitProgress(false);
+  });
+
+  try {
+    await pipeline(
+      // @ts-ignore
+      stream.Readable.fromWeb(response.body),
+      progressStream,
+      fs.createWriteStream(tempPath),
+    );
+  } catch (e) {
+    const { userMessage, meta } = formatErrorWithHints(e, {
+      op: `Download PWR (${buildName})`,
+      url: logUrl ?? url,
+      filePath: tempPath,
+    });
+    logger.error("PWR download pipeline failed", meta, e);
+    const wrapped = new Error(userMessage);
+    (wrapped as any).cause = e;
+    throw wrapped;
+  }
+
+  const elapsedMs = Date.now() - startedAt;
+  const st = safeStat(tempPath);
+  logger.info(
+    `PWR download completed: ${tempPath} (written=${downloadedLength} bytes, onDisk=${st?.size ?? "?"} bytes, ms=${elapsedMs})`,
+  );
+
+  // Hash the file so we can compare across runs (detect silent corruption).
+  try {
+    const hash = await sha256File(tempPath);
+    logger.info(`PWR sha256: ${hash}`);
+  } catch (e) {
+    logger.warn(
+      `Failed to compute PWR sha256: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  // Quick sanity check: if Content-Length exists and doesn't match file size, treat as corrupted/truncated.
+  if (
+    typeof totalLength === "number" &&
+    Number.isFinite(totalLength) &&
+    totalLength > 0 &&
+    typeof st?.size === "number" &&
+    st.size !== totalLength
+  ) {
+    logger.error(
+      `PWR size mismatch: expected=${totalLength} bytes but got=${st.size} bytes at ${tempPath}`,
+    );
+    throw new Error(
+      `Downloaded PWR appears truncated/corrupted (size mismatch: expected ${totalLength}, got ${st.size}).`,
+    );
+  }
+
+  // Sniff first bytes to detect HTML/error pages masquerading as .pwr.
+  const headHex = readHexSnippet(tempPath, 0, 32);
+  if (headHex) logger.info(`PWR header bytes (hex): ${headHex}`);
+  if (st?.size && st.size >= 32) {
+    const tailHex = readHexSnippet(tempPath, Math.max(0, st.size - 32), 32);
+    if (tailHex) logger.info(`PWR tail bytes (hex): ${tailHex}`);
+  }
+
+  win.webContents.send("install-progress", {
+    phase: "pwr-download",
+    percent: 100,
+    total: totalLength,
+    current: downloadedLength,
+    ...(stepMeta ?? {}),
+  });
+};
+
+const downloadPwrParallelRanges = async (opts: {
+  url: string;
+  tempPath: string;
+  totalBytes: number;
+  connections: number;
+  win: BrowserWindow;
+  controller: AbortController;
+  stepMeta?: { stepIndex: number; stepTotal: number };
+  extraHeaders?: Record<string, string>;
+  buildName: string;
+}) => {
+  const {
+    url,
+    tempPath,
+    totalBytes,
+    connections,
+    win,
+    controller,
+    stepMeta,
+    extraHeaders,
+  } = opts;
+
+  if (!Number.isFinite(totalBytes) || totalBytes <= 0) {
+    throw new RangeUnsupportedError("Missing total size for parallel download");
+  }
+
+  // Emit a start event so UI doesn't show 0/0.
+  win.webContents.send("install-progress", {
+    phase: "pwr-download",
+    percent: 0,
+    total: totalBytes,
+    current: 0,
+    ...(stepMeta ?? {}),
+  });
+
+  // Preallocate target file so we can write segments at offsets.
+  preallocateFile(tempPath, totalBytes);
+
+  const startedAt = Date.now();
+  let downloadedLength = 0;
+  const progressIntervalMs = 200;
+  let lastProgressAt = 0;
+
+  const emitProgress = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastProgressAt < progressIntervalMs) return;
+    lastProgressAt = now;
+    const percent = Math.max(0, Math.min(100, Math.round((downloadedLength / totalBytes) * 100)));
+    win.webContents.send("install-progress", {
+      phase: "pwr-download",
+      percent,
+      total: totalBytes,
+      current: downloadedLength,
+      ...(stepMeta ?? {}),
+    });
+  };
+
+  // Build ranges.
+  const parts = Math.max(2, Math.min(connections, 16));
+  const chunk = Math.ceil(totalBytes / parts);
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i < parts; i++) {
+    const start = i * chunk;
+    const end = Math.min(totalBytes - 1, start + chunk - 1);
+    if (start > end) break;
+    ranges.push({ start, end });
+  }
+  if (ranges.length < 2) throw new RangeUnsupportedError("File too small for parallel ranges");
+
+  const abortAll = () => {
+    try {
+      controller.abort();
+    } catch {
+      // ignore
+    }
+  };
+
+  const runOne = async (range: { start: number; end: number }) => {
+    const headers: Record<string, string> = {
+      ...(extraHeaders ?? {}),
+      Range: `bytes=${range.start}-${range.end}`,
+    };
+    const res = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+    });
+
+    if (res.status === 200) {
+      // Server ignored Range; fall back to single download.
+      throw new RangeUnsupportedError("Server did not honor Range (HTTP 200)");
+    }
+    if (res.status === 416) {
+      throw new RangeUnsupportedError("Server rejected Range (HTTP 416)");
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    }
+    if (!res.body) throw new Error("No response body");
+
+    const writeStream = fs.createWriteStream(tempPath, {
+      flags: "r+",
+      start: range.start,
+    });
+
+    const progressStream = new stream.PassThrough();
+    progressStream.on("data", (chunkBuf) => {
+      downloadedLength += chunkBuf.length;
+      emitProgress(false);
+    });
+
+    await pipeline(
+      // @ts-ignore
+      stream.Readable.fromWeb(res.body),
+      progressStream,
+      writeStream,
+    );
+  };
+
+  try {
+    logger.info(
+      `PWR parallel download: total=${(totalBytes / 1024 / 1024).toFixed(2)}MB parts=${ranges.length}`,
+    );
+    await Promise.all(
+      ranges.map(async (r) => {
+        if (controller.signal.aborted) throw new UserCancelledError();
+        return runOne(r);
+      }),
+    );
+  } catch (e) {
+    abortAll();
+    throw e;
+  } finally {
+    emitProgress(true);
+  }
+
+  const elapsedMs = Date.now() - startedAt;
+  const st = safeStat(tempPath);
+  logger.info(
+    `PWR parallel download completed: ${tempPath} (written=${downloadedLength} bytes, onDisk=${st?.size ?? "?"} bytes, ms=${elapsedMs})`,
+  );
+
+  // Verify file size.
+  if (typeof st?.size === "number" && st.size !== totalBytes) {
+    throw new Error(
+      `Downloaded PWR appears truncated/corrupted (size mismatch: expected ${totalBytes}, got ${st.size}).`,
+    );
+  }
+
+  // Hash for debugging.
+  try {
+    const hash = await sha256File(tempPath);
+    logger.info(`PWR sha256: ${hash}`);
+  } catch (e) {
+    logger.warn(
+      `Failed to compute PWR sha256: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  // Sniff first bytes.
+  const headHex = readHexSnippet(tempPath, 0, 32);
+  if (headHex) logger.info(`PWR header bytes (hex): ${headHex}`);
+  if (st?.size && st.size >= 32) {
+    const tailHex = readHexSnippet(tempPath, Math.max(0, st.size - 32), 32);
+    if (tailHex) logger.info(`PWR tail bytes (hex): ${tailHex}`);
+  }
+
+  win.webContents.send("install-progress", {
+    phase: "pwr-download",
+    percent: 100,
+    total: totalBytes,
+    current: downloadedLength,
+    ...(stepMeta ?? {}),
+  });
+};
+
 // manifest helpers live in ./manifest
 
 const downloadPWR = async (
@@ -884,13 +1476,13 @@ const downloadPWR = async (
   const key = installKey(gameDir, version);
   const controller = new AbortController();
 
+  const { startLogLine, safeUrlForMeta } = describePwrDownloadForLogs(version);
+
   // yes this is global state and yes it will haunt us later
   pwrDownloadsInFlight.set(key, { controller, tempPath: tempPWRPath });
 
   try {
-    logger.info(
-      `Starting PWR download for version ${version.build_name} from ${version.url}`,
-    );
+    logger.info(startLogLine);
 
     // Best-effort: if we have a separate HEAD URL (signed/verified CDN links sometimes do),
     // use it to validate reachability before streaming the full file.
@@ -913,135 +1505,94 @@ const downloadPWR = async (
       );
     }
 
-    const startedAt = Date.now();
-    const response = await fetch(version.url, {
-      signal: controller.signal,
-      headers: extraHeaders,
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}`);
-    }
-    if (!response.body) throw new Error("No response body");
+    const isNoPremium = !extraHeaders || Object.keys(extraHeaders).length === 0;
+    const wantsParallel = isNoPremium && getNoPremiumParallelPwrConnections() > 1;
 
-    const contentType = response.headers.get("content-type") || undefined;
-    const contentEncoding = response.headers.get("content-encoding") || undefined;
-    const etag = response.headers.get("etag") || undefined;
-    const lastModified = response.headers.get("last-modified") || undefined;
-    const acceptRanges = response.headers.get("accept-ranges") || undefined;
+    if (wantsParallel) {
+      // Probe Range support and total size using a 1-byte range request.
+      // If unsupported, fall back to single-stream download.
+      try {
+        const probeHeaders: Record<string, string> = {
+          ...(extraHeaders ?? {}),
+          Range: "bytes=0-0",
+        };
+        const probeRes = await fetch(version.url, {
+          method: "GET",
+          headers: probeHeaders,
+          signal: controller.signal,
+        });
 
-    const contentLength = response.headers.get("content-length");
-    const totalLength = contentLength ? parseInt(contentLength, 10) : undefined;
-    let downloadedLength = 0;
+        // Some servers might still return 200 and the full body; don't risk it.
+        if (probeRes.status !== 206) {
+          throw new RangeUnsupportedError(
+            `Range probe not supported (HTTP ${probeRes.status})`,
+          );
+        }
 
-    logger.info(
-      `PWR size: ${totalLength ? (totalLength / 1024 / 1024).toFixed(2) + " MB" : "unknown"}`,
-    );
-    logger.info(
-      `PWR headers: content-type=${contentType ?? "unknown"} content-encoding=${contentEncoding ?? "none"} etag=${etag ?? "none"} last-modified=${lastModified ?? "none"} accept-ranges=${acceptRanges ?? "unknown"}`,
-    );
+        const total =
+          parseContentRangeTotal(probeRes.headers.get("content-range")) ??
+          (() => {
+            const cl = probeRes.headers.get("content-length");
+            const n = cl ? parseInt(cl, 10) : NaN;
+            return Number.isFinite(n) && n > 0 ? n : null;
+          })();
 
-    // Emit a start event so UI doesn't show 0/0.
-    win.webContents.send("install-progress", {
-      phase: "pwr-download",
-      percent: totalLength ? 0 : -1,
-      total: totalLength,
-      current: 0,
-      ...(stepMeta ?? {}),
-    });
+        // Drain probe body (1 byte) so node doesn't keep the socket busy.
+        try {
+          await probeRes.arrayBuffer();
+        } catch {
+          // ignore
+        }
 
-    const progressStream = new stream.PassThrough();
-    const progressIntervalMs = 200;
-    let lastProgressAt = 0;
-    const emitProgress = (force = false) => {
-      const now = Date.now();
-      if (!force && now - lastProgressAt < progressIntervalMs) return;
-      lastProgressAt = now;
+        if (!total || total < MIN_PARALLEL_PWR_BYTES) {
+          throw new RangeUnsupportedError(
+            `PWR too small for parallel ranges (total=${total ?? "?"})`,
+          );
+        }
 
-      const percent =
-        typeof totalLength === "number" && totalLength > 0
-          ? Math.round((downloadedLength / totalLength) * 100)
-          : -1;
-
-      win.webContents.send("install-progress", {
-        phase: "pwr-download",
-        percent,
-        total: totalLength,
-        current: downloadedLength,
-        ...(stepMeta ?? {}),
-      });
-    };
-
-    progressStream.on("data", (chunk) => {
-      downloadedLength += chunk.length;
-      emitProgress(false);
-    });
-
-    try {
-      await pipeline(
-        // @ts-ignore
-        stream.Readable.fromWeb(response.body),
-        progressStream,
-        fs.createWriteStream(tempPWRPath),
-      );
-    } catch (e) {
-      const { userMessage, meta } = formatErrorWithHints(e, {
-        op: `Download PWR (${version.build_name})`,
+        const conn = getNoPremiumParallelPwrConnections();
+        await downloadPwrParallelRanges({
+          url: version.url,
+          tempPath: tempPWRPath,
+          totalBytes: total,
+          connections: conn,
+          win,
+          controller,
+          stepMeta,
+          extraHeaders,
+          buildName: version.build_name,
+        });
+      } catch (e) {
+        if (e instanceof RangeUnsupportedError) {
+          logger.info(
+            `Parallel PWR download disabled (fallback to single): ${e.message}`,
+          );
+          await downloadPwrSingle({
+            url: version.url,
+            logUrl: safeUrlForMeta,
+            tempPath: tempPWRPath,
+            win,
+            controller,
+            stepMeta,
+            extraHeaders,
+            buildName: version.build_name,
+          });
+        } else {
+          throw e;
+        }
+      }
+    } else {
+      await downloadPwrSingle({
         url: version.url,
-        filePath: tempPWRPath,
+        logUrl: safeUrlForMeta,
+        tempPath: tempPWRPath,
+        win,
+        controller,
+        stepMeta,
+        extraHeaders,
+        buildName: version.build_name,
       });
-      logger.error("PWR download pipeline failed", meta, e);
-      const wrapped = new Error(userMessage);
-      (wrapped as any).cause = e;
-      throw wrapped;
     }
-
-    const elapsedMs = Date.now() - startedAt;
-    const st = safeStat(tempPWRPath);
-    logger.info(
-      `PWR download completed: ${tempPWRPath} (written=${downloadedLength} bytes, onDisk=${st?.size ?? "?"} bytes, ms=${elapsedMs})`,
-    );
-
-    // Hash the file so we can compare across runs (detect silent corruption).
-    try {
-      const hash = await sha256File(tempPWRPath);
-      logger.info(`PWR sha256: ${hash}`);
-    } catch (e) {
-      logger.warn(
-        `Failed to compute PWR sha256: ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-
-    // Quick sanity check: if Content-Length exists and doesn't match file size, treat as corrupted/truncated.
-    if (
-      typeof totalLength === "number" &&
-      Number.isFinite(totalLength) &&
-      totalLength > 0 &&
-      typeof st?.size === "number" &&
-      st.size !== totalLength
-    ) {
-      logger.error(
-        `PWR size mismatch: expected=${totalLength} bytes but got=${st.size} bytes at ${tempPWRPath}`,
-      );
-      throw new Error(
-        `Downloaded PWR appears truncated/corrupted (size mismatch: expected ${totalLength}, got ${st.size}).`,
-      );
-    }
-
-    // Sniff first bytes to detect HTML/error pages masquerading as .pwr.
-    const headHex = readHexSnippet(tempPWRPath, 0, 32);
-    if (headHex) logger.info(`PWR header bytes (hex): ${headHex}`);
-    if (st?.size && st.size >= 32) {
-      const tailHex = readHexSnippet(tempPWRPath, Math.max(0, st.size - 32), 32);
-      if (tailHex) logger.info(`PWR tail bytes (hex): ${tailHex}`);
-    }
-
-    win.webContents.send("install-progress", {
-      phase: "pwr-download",
-      percent: 100,
-      total: totalLength,
-      current: downloadedLength,
-      ...(stepMeta ?? {}),
-    });
 
     return tempPWRPath;
   } catch (error) {
@@ -1058,6 +1609,11 @@ const downloadPWR = async (
       throw new UserCancelledError();
     }
 
+    // Best-effort cleanup of partial multi-GB temp files.
+    if (!shouldKeepFailedPWRs()) {
+      safeUnlink(tempPWRPath);
+    }
+
     const statusMatch =
       typeof (error as any)?.message === "string"
         ? (error as any).message.match(/^HTTP\s+(\d{3})\b/)
@@ -1066,7 +1622,7 @@ const downloadPWR = async (
 
     const { userMessage, meta } = formatErrorWithHints(error, {
       op: `Download PWR (${version.build_name})`,
-      url: version.url,
+      url: safeUrlForMeta,
       filePath: tempPWRPath,
       status: Number.isFinite(status as any) ? status : undefined,
     });
@@ -1676,6 +2232,10 @@ export const installGameNoPremiumFull = async (
 ) => {
   return await installGameFromPatchPlan(gameDir, version, win, {
     label: "INSTALL-NP-FULL",
+    // NP-FULL is intended to be a *full* install from an empty tree.
+    // Force base=0 so the patch-plan request matches "0 -> target" uploads.
+    // (If we let it pick an installed base like Build-1, the server would need 1->target diffs.)
+    baseOverride: 0,
     patchPlan: { kind: "nopremium" },
   });
 };

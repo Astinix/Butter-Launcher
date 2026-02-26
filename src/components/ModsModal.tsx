@@ -31,6 +31,7 @@ type DiscoverMod = {
 
 type BrowseSort =
   | "relevance"
+  | "installedFirst"
   | "popularity"
   | "latestUpdate"
   | "creationDate"
@@ -132,10 +133,48 @@ const ModsModal: React.FC<{
   const [modsDir, setModsDir] = useState<string>("");
   const [installedItems, setInstalledItems] = useState<InstalledModFile[]>([]);
 
+  const [attachPrompt, setAttachPrompt] = useState<{
+    open: boolean;
+    fileName: string;
+  }>({ open: false, fileName: "" });
+  const [attachLinkInput, setAttachLinkInput] = useState<string>("");
+  const [attachLinkError, setAttachLinkError] = useState<string>("");
+
+  const [deleteModPrompt, setDeleteModPrompt] = useState<{
+    open: boolean;
+    fileName: string;
+  }>({ open: false, fileName: "" });
+
+  const [updatesWorking, setUpdatesWorking] = useState(false);
+
+  const [checkedUpdatesByModId, setCheckedUpdatesByModId] = useState<
+    Record<
+      number,
+      { updateAvailable: boolean; latestFileId: number | null; latestName: string }
+    >
+  >({});
+  const [checkedAllOnce, setCheckedAllOnce] = useState(false);
+
   const [registryError, setRegistryError] = useState<string>("");
   const [registryByModId, setRegistryByModId] = useState<
     Record<number, ModRegistryEntry>
   >({});
+
+  const sortDiscoverInstalledFirst = (mods: DiscoverMod[]) => {
+    // Stable sort based on current order.
+    const decorated = mods.map((mod, idx) => ({
+      mod,
+      idx,
+      installed: !!registryByModId[Number(mod?.id)],
+    }));
+    decorated.sort((a, b) => {
+      const ai = a.installed ? 1 : 0;
+      const bi = b.installed ? 1 : 0;
+      if (ai !== bi) return bi - ai;
+      return a.idx - b.idx;
+    });
+    return decorated.map((x) => x.mod);
+  };
 
   const [profilesLoading, setProfilesLoading] = useState(false);
   const [profilesError, setProfilesError] = useState<string>("");
@@ -156,6 +195,9 @@ const ModsModal: React.FC<{
   const [importing, setImporting] = useState(false);
   const [importNotice, setImportNotice] = useState<string>("");
   const [importError, setImportError] = useState<string>("");
+  const [importPromptOpen, setImportPromptOpen] = useState(false);
+  const [importPromptText, setImportPromptText] = useState<string>("");
+  const [importPromptError, setImportPromptError] = useState<string>("");
   const [importCurrent, setImportCurrent] = useState<{
     idx: number;
     total: number;
@@ -204,6 +246,17 @@ const ModsModal: React.FC<{
     return dir;
   };
 
+  const formatModsError = (
+    res: any,
+    fallbackKey: string,
+    fallbackArgs?: Record<string, any>,
+  ) => {
+    if (res?.errorKey) return t(String(res.errorKey), res.errorArgs ?? {});
+    const raw = typeof res?.error === "string" ? res.error.trim() : "";
+    if (raw) return raw;
+    return t(fallbackKey, fallbackArgs ?? {});
+  };
+
   const loadDiscover = async (opts?: {
     reset?: boolean;
     q?: string;
@@ -217,14 +270,18 @@ const ModsModal: React.FC<{
       const s = opts?.sort ?? sort;
       const nextIndex = reset ? 0 : pageIndex + pageSize;
 
+      const backendSort: BrowseSort =
+        s === "installedFirst" ? "popularity" : s;
+
       const res = await window.config.modsBrowse({
         query: q ?? "",
-        sort: s,
+        sort: backendSort,
         index: nextIndex,
         pageSize,
       });
 
-      if (!res?.ok) throw new Error(res?.error || "Failed to load mods");
+      if (!res?.ok)
+        throw new Error(formatModsError(res, "modsModal.errors.loadModsFailed"));
       const mods = Array.isArray(res.mods) ? (res.mods as DiscoverMod[]) : [];
       const pagination = res.pagination ?? null;
       const total =
@@ -234,14 +291,20 @@ const ModsModal: React.FC<{
 
       setTotalCount(total);
       setPageIndex(nextIndex);
-      setDiscoverMods((prev) => (reset ? mods : [...prev, ...mods]));
+      setDiscoverMods((prev) => {
+        const combined = reset ? mods : [...prev, ...mods];
+        return s === "installedFirst"
+          ? sortDiscoverInstalledFirst(combined)
+          : combined;
+      });
 
       const got = mods.length;
       const computedHasMore =
         total != null ? nextIndex + got < total : got >= pageSize;
       setHasMore(computedHasMore);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Unknown error";
+      const message =
+        e instanceof Error ? e.message : t("modsModal.errors.unknown");
       setDiscoverError(message);
       setDiscoverMods([]);
       setHasMore(false);
@@ -251,6 +314,11 @@ const ModsModal: React.FC<{
     }
   };
 
+  useEffect(() => {
+    if (sort !== "installedFirst") return;
+    setDiscoverMods((prev) => sortDiscoverInstalledFirst(prev));
+  }, [sort, registryByModId]);
+
   const loadDetails = async (modId: number) => {
     setDetailsLoading(true);
     setDetailsError("");
@@ -259,7 +327,10 @@ const ModsModal: React.FC<{
     setDetailsHtml("");
     try {
       const res = await window.config.modsGetDetails(modId);
-      if (!res?.ok) throw new Error(res?.error || "Failed to load mod details");
+      if (!res?.ok)
+        throw new Error(
+          formatModsError(res, "modsModal.errors.loadModDetailsFailed"),
+        );
 
       setDetailsMod(res.mod as ModDetails);
       setDetailsFiles(
@@ -267,7 +338,8 @@ const ModsModal: React.FC<{
       );
       setDetailsHtml(sanitizeHtmlAllowImages(res.html, { maxLength: 200_000 }));
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Unknown error";
+      const message =
+        e instanceof Error ? e.message : t("modsModal.errors.unknown");
       setDetailsError(message);
     } finally {
       setDetailsLoading(false);
@@ -281,7 +353,9 @@ const ModsModal: React.FC<{
       const dir = await ensureGameDir();
       const res = await window.config.modsInstalledList(dir);
       if (!res?.ok)
-        throw new Error(res?.error || "Failed to load installed mods");
+        throw new Error(
+          formatModsError(res, "modsModal.errors.loadInstalledModsFailed"),
+        );
       setModsDir(res.modsDir);
       setInstalledItems(res.items ?? []);
 
@@ -293,7 +367,8 @@ const ModsModal: React.FC<{
           .filter(Boolean),
       );
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Unknown error";
+      const message =
+        e instanceof Error ? e.message : t("modsModal.errors.unknown");
       setInstalledError(message);
       setInstalledItems([]);
       setModsDir("");
@@ -311,7 +386,9 @@ const ModsModal: React.FC<{
       const gameDir = dir ?? (await ensureGameDir());
       const res = await window.config.modsRegistry(gameDir);
       if (!res?.ok)
-        throw new Error(res?.error || "Failed to load mods registry");
+        throw new Error(
+          formatModsError(res, "modsModal.errors.loadModsRegistryFailed"),
+        );
 
       const list = Array.isArray(res.items)
         ? (res.items as ModRegistryEntry[])
@@ -342,7 +419,8 @@ const ModsModal: React.FC<{
       }
       setRegistryByModId(map);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Unknown error";
+      const message =
+        e instanceof Error ? e.message : t("modsModal.errors.unknown");
       setRegistryError(message);
       setRegistryByModId({});
     }
@@ -354,20 +432,28 @@ const ModsModal: React.FC<{
     try {
       const dir = await ensureGameDir();
       const res = await window.config.modsProfilesList(dir);
-      if (!res?.ok) throw new Error(res?.error || "Failed to load profiles");
+      if (!res?.ok)
+        throw new Error(
+          formatModsError(res, "modsModal.errors.loadProfilesFailed"),
+        );
       const list = Array.isArray(res.profiles)
         ? (res.profiles as ModProfile[])
         : [];
       setProfiles(list);
-      setSelectedProfileName((prev) => {
-        if (prev && list.some((p) => p.name === prev)) return prev;
-        return list[0]?.name ?? "";
-      });
+
+      const keepSelected =
+        selectedProfileName && list.some((p) => p.name === selectedProfileName)
+          ? selectedProfileName
+          : list[0]?.name ?? "";
+      setSelectedProfileName(keepSelected);
+      setProfileNameInput((prev) => (prev.trim() ? prev : keepSelected));
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Unknown error";
+      const message =
+        e instanceof Error ? e.message : t("modsModal.errors.unknown");
       setProfilesError(message);
       setProfiles([]);
       setSelectedProfileName("");
+      setProfileNameInput("");
     } finally {
       setProfilesLoading(false);
     }
@@ -577,6 +663,21 @@ const ModsModal: React.FC<{
     }
     return map;
   }, [registryByModId]);
+
+  const ATTACH_LINK_EXAMPLE = "https://www.curseforge.com/hytale/mods/example";
+  const isValidAttachLink = (url: string) => {
+    const s = typeof url === "string" ? url.trim() : "";
+    if (!s) return false;
+    return /^https:\/\/www\.curseforge\.com\/hytale\/mods\/[a-z0-9][a-z0-9-]*\/?$/i.test(
+      s,
+    );
+  };
+
+  const openAttachPrompt = (fileName: string) => {
+    setAttachLinkInput("");
+    setAttachLinkError("");
+    setAttachPrompt({ open: true, fileName });
+  };
 
   const profileModsUnionNames = useMemo(() => {
     const names = new Set<string>(installedBaseNames);
@@ -896,6 +997,9 @@ const ModsModal: React.FC<{
                   className="px-3 py-2 rounded-lg bg-[#141824]/80 border border-[#2a3146] text-white text-sm outline-none focus:border-blue-400/60"
                   title={t("common.sortBy")}
                 >
+                  <option value="installedFirst">
+                    {t("modsModal.sort.installedFirst")}
+                  </option>
                   <option value="relevance">
                     {t("modsModal.sort.relevance")}
                   </option>
@@ -1502,6 +1606,93 @@ const ModsModal: React.FC<{
                     type="button"
                     className={cn(
                       "px-3 py-2 rounded-lg border border-[#2a3146]",
+                      "bg-transparent hover:bg-white/5 text-gray-200 transition",
+                      (installedLoading || updatesWorking) &&
+                        "opacity-60 cursor-not-allowed",
+                    )}
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          setUpdatesWorking(true);
+                          setInstalledError("");
+                          const dir = await ensureGameDir();
+                          if (checkedAllOnce) {
+                            const res = await window.config.modsUpdateAll(dir);
+                            if (res && (res as any).ok === false) {
+                              setInstalledError(
+                                formatModsError(
+                                  res,
+                                  "modsModal.installed.updateFailed",
+                                ),
+                              );
+                            }
+                            setCheckedUpdatesByModId({});
+                            await loadInstalled(false);
+                          } else {
+                            const res = await window.config.modsCheckUpdatesAll(
+                              dir,
+                            );
+                            if (res && (res as any).ok === false) {
+                              setInstalledError(
+                                formatModsError(
+                                  res,
+                                  "modsModal.installed.checkFailed",
+                                ),
+                              );
+                              return;
+                            }
+
+                            const results = Array.isArray(
+                              (res as any).results,
+                            )
+                              ? ((res as any).results as Array<any>)
+                              : [];
+
+                            const next: Record<
+                              number,
+                              {
+                                updateAvailable: boolean;
+                                latestFileId: number | null;
+                                latestName: string;
+                              }
+                            > = {};
+                            for (const r of results) {
+                              const id = Number(r?.modId);
+                              if (!Number.isFinite(id) || id <= 0) continue;
+                              next[id] = {
+                                updateAvailable: !!r?.updateAvailable,
+                                latestFileId:
+                                  typeof r?.latestFileId === "number"
+                                    ? r.latestFileId
+                                    : null,
+                                latestName:
+                                  typeof r?.latestName === "string"
+                                    ? r.latestName
+                                    : "",
+                              };
+                            }
+                            setCheckedUpdatesByModId(next);
+                            setCheckedAllOnce(true);
+                          }
+                        } catch {
+                          // ignore
+                        } finally {
+                          setUpdatesWorking(false);
+                        }
+                      })();
+                    }}
+                    disabled={installedLoading || updatesWorking}
+                    title={t("modsModal.installed.checkUpdates")}
+                  >
+                    {checkedAllOnce
+                      ? t("modsModal.installed.updateAll")
+                      : t("modsModal.installed.checkUpdates")}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={cn(
+                      "px-3 py-2 rounded-lg border border-[#2a3146]",
                       "bg-[#23293a] hover:bg-[#2f3650] text-white transition",
                       installedLoading && "opacity-60 cursor-not-allowed",
                     )}
@@ -1509,7 +1700,19 @@ const ModsModal: React.FC<{
                       void (async () => {
                         try {
                           const dir = await ensureGameDir();
-                          await window.config.modsInstalledSetAll(dir, true);
+                          const res = await window.config.modsInstalledSetAll(
+                            dir,
+                            true,
+                          );
+                          if (res && (res as any).ok === false) {
+                            setInstalledError(
+                              formatModsError(
+                                res,
+                                "modsModal.errors.unknown",
+                              ),
+                            );
+                            return;
+                          }
                           await loadInstalled();
                         } catch {
                           // ignore
@@ -1533,7 +1736,19 @@ const ModsModal: React.FC<{
                       void (async () => {
                         try {
                           const dir = await ensureGameDir();
-                          await window.config.modsInstalledSetAll(dir, false);
+                          const res = await window.config.modsInstalledSetAll(
+                            dir,
+                            false,
+                          );
+                          if (res && (res as any).ok === false) {
+                            setInstalledError(
+                              formatModsError(
+                                res,
+                                "modsModal.errors.unknown",
+                              ),
+                            );
+                            return;
+                          }
                           await loadInstalled();
                         } catch {
                           // ignore
@@ -1584,6 +1799,25 @@ const ModsModal: React.FC<{
                   </div>
                 ) : installedItems.length ? (
                   installedItems.map((it) => (
+                    (() => {
+                      const base = baseName(it.fileName).trim();
+                      const reg = base
+                        ? registryByBaseName.get(base.toLowerCase()) ?? null
+                        : null;
+                      const managedModId = reg?.modId;
+                      const isManual = !reg;
+
+                      const canCheckUpdate =
+                        typeof managedModId === "number" &&
+                        Number.isFinite(managedModId) &&
+                        managedModId > 0;
+
+                      const checked =
+                        typeof managedModId === "number"
+                          ? checkedUpdatesByModId[managedModId]
+                          : undefined;
+
+                      return (
                     <div
                       key={it.fileName}
                       className="flex items-center justify-between gap-3 px-3 py-2 border-b border-white/5"
@@ -1592,19 +1826,131 @@ const ModsModal: React.FC<{
                         <div className="text-xs text-white truncate">
                           {it.fileName}
                         </div>
-                        <div
-                          className={cn(
-                            "text-[10px]",
-                            it.enabled ? "text-green-300" : "text-gray-400",
-                          )}
-                        >
-                          {it.enabled
-                            ? t("common.enabled")
-                            : t("common.disabled")}
+                        <div className="mt-0.5 flex items-center gap-2">
+                          <div
+                            className={cn(
+                              "text-[10px]",
+                              it.enabled ? "text-green-300" : "text-gray-400",
+                            )}
+                          >
+                            {it.enabled
+                              ? t("common.enabled")
+                              : t("common.disabled")}
+                          </div>
+
+                          {isManual ? (
+                            <div className="text-[10px] text-yellow-300">
+                              {t("modsModal.installed.installedManually")}
+                            </div>
+                          ) : null}
                         </div>
+
+                        {!isManual && checked?.updateAvailable ? (
+                          <div className="text-[10px] text-gray-400 mt-0.5 truncate">
+                            {t("modsModal.installed.latestVersion")}: {checked.latestName || ""}
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="flex items-center gap-2">
+                        {isManual ? (
+                          <button
+                            type="button"
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg border border-[#2a3146] text-xs",
+                              "bg-transparent hover:bg-white/5 text-yellow-100 transition",
+                            )}
+                            onClick={() => openAttachPrompt(it.fileName)}
+                            title={t("modsModal.installed.attachToLauncher")}
+                          >
+                            {t("modsModal.installed.attachToLauncher")}
+                          </button>
+                        ) : canCheckUpdate ? (
+                          <button
+                            type="button"
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg border border-[#2a3146] text-xs",
+                              "bg-transparent hover:bg-white/5 text-gray-200 transition",
+                              (updatesWorking || installingId === managedModId) &&
+                                "opacity-60 cursor-not-allowed",
+                            )}
+                            disabled={updatesWorking || installingId === managedModId}
+                            onClick={() => {
+                              void (async () => {
+                                try {
+                                  setUpdatesWorking(true);
+                                  setInstalledError("");
+                                  const dir = await ensureGameDir();
+                                  if (checked?.updateAvailable) {
+                                    setInstallingId(managedModId);
+                                    const res = await window.config.modsUpdateOne(
+                                      dir,
+                                      managedModId,
+                                    );
+                                    if (res && (res as any).ok === false) {
+                                      setInstalledError(
+                                        formatModsError(
+                                          res,
+                                          "modsModal.installed.updateFailed",
+                                        ),
+                                      );
+                                    }
+                                    setCheckedUpdatesByModId((prev) => {
+                                      const copy = { ...prev };
+                                      delete copy[managedModId];
+                                      return copy;
+                                    });
+                                    await loadInstalled(false);
+                                  } else {
+                                    const res =
+                                      await window.config.modsCheckUpdateOne(
+                                        dir,
+                                        managedModId,
+                                      );
+                                    if (res && (res as any).ok === false) {
+                                      setInstalledError(
+                                        formatModsError(
+                                          res,
+                                          "modsModal.installed.checkFailed",
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    setCheckedUpdatesByModId((prev) => ({
+                                      ...prev,
+                                      [managedModId]: {
+                                        updateAvailable: !!(res as any)
+                                          ?.updateAvailable,
+                                        latestFileId:
+                                          typeof (res as any)?.latestFileId ===
+                                          "number"
+                                            ? (res as any).latestFileId
+                                            : null,
+                                        latestName:
+                                          typeof (res as any)?.latestName ===
+                                          "string"
+                                            ? (res as any).latestName
+                                            : "",
+                                      },
+                                    }));
+                                  }
+                                } catch {
+                                  // ignore
+                                } finally {
+                                  setInstallingId(null);
+                                  setUpdatesWorking(false);
+                                }
+                              })();
+                            }}
+                            title={t("modsModal.installed.checkUpdate")}
+                          >
+                            {checked?.updateAvailable
+                              ? t("modsModal.installed.update")
+                              : t("modsModal.installed.checkUpdate")}
+                          </button>
+                        ) : null}
+
                         <button
                           type="button"
                           className={cn(
@@ -1618,10 +1964,20 @@ const ModsModal: React.FC<{
                             void (async () => {
                               try {
                                 const dir = await ensureGameDir();
-                                await window.config.modsInstalledToggle(
+                                const res =
+                                  await window.config.modsInstalledToggle(
                                   dir,
                                   it.fileName,
                                 );
+                                if (res && (res as any).ok === false) {
+                                  setInstalledError(
+                                    formatModsError(
+                                      res,
+                                      "modsModal.errors.unknown",
+                                    ),
+                                  );
+                                  return;
+                                }
                                 await loadInstalled(false);
                               } catch {
                                 // ignore
@@ -1639,18 +1995,10 @@ const ModsModal: React.FC<{
                           type="button"
                           className="w-9 h-9 rounded-lg border border-[#2a3146] bg-transparent hover:bg-red-500/15 text-red-300 hover:text-red-200 transition flex items-center justify-center"
                           onClick={() => {
-                            void (async () => {
-                              try {
-                                const dir = await ensureGameDir();
-                                await window.config.modsInstalledDelete(
-                                  dir,
-                                  it.fileName,
-                                );
-                                await loadInstalled(false);
-                              } catch {
-                                // ignore
-                              }
-                            })();
+                            setDeleteModPrompt({
+                              open: true,
+                              fileName: it.fileName,
+                            });
                           }}
                           title={t("common.delete")}
                         >
@@ -1658,6 +2006,8 @@ const ModsModal: React.FC<{
                         </button>
                       </div>
                     </div>
+                      );
+                    })()
                   ))
                 ) : (
                   <div className="p-3 text-xs text-gray-300">
@@ -1692,7 +2042,9 @@ const ModsModal: React.FC<{
                       void (async () => {
                         try {
                           const dir = await ensureGameDir();
-                          const name = profileNameInput.trim();
+                          const name = sanitizeProfileName(
+                            profileNameInput || selectedProfileName,
+                          );
                           if (!name) return;
                           const fallbackMods =
                             profiles.find((p) => p.name === selectedProfileName)
@@ -1734,18 +2086,31 @@ const ModsModal: React.FC<{
                               entry.fileId = reg.fileId;
                             cf[key] = entry;
                           }
-
-                          await window.config.modsProfilesSave(dir, {
-                            name,
-                            mods: modsToSave,
-                            cf,
-                          });
-                          setProfileNameInput("");
+                          const res = await window.config.modsProfilesSave(
+                            dir,
+                            {
+                              name,
+                              mods: modsToSave,
+                              cf,
+                            },
+                          );
+                          if (res && (res as any).ok === false) {
+                            setProfilesError(
+                              formatModsError(
+                                res,
+                                "modsModal.errors.unknown",
+                              ),
+                            );
+                            return;
+                          }
+                          setProfileNameInput(name);
                           await loadProfiles();
                           setSelectedProfileName(name);
                         } catch (e) {
                           const message =
-                            e instanceof Error ? e.message : "Unknown error";
+                            e instanceof Error
+                              ? e.message
+                              : t("modsModal.errors.unknown");
                           setProfilesError(message);
                         }
                       })();
@@ -1782,6 +2147,7 @@ const ModsModal: React.FC<{
                           onClick={() => {
                             // Load the profile mods immediately so the UI doesn't gaslight you with "0 mods".
                             setSelectedProfileName(p.name);
+                            setProfileNameInput(p.name);
                             const selected = new Set(
                               (p.mods ?? []).filter(Boolean),
                             );
@@ -1836,14 +2202,25 @@ const ModsModal: React.FC<{
                         try {
                           const dir = await ensureGameDir();
                           if (!selectedProfileName) return;
-                          await window.config.modsProfilesApply(
+                          const res = await window.config.modsProfilesApply(
                             dir,
                             selectedProfileName,
                           );
+                          if (res && (res as any).ok === false) {
+                            setProfilesError(
+                              formatModsError(
+                                res,
+                                "modsModal.errors.unknown",
+                              ),
+                            );
+                            return;
+                          }
                           await loadInstalled();
                         } catch (e) {
                           const message =
-                            e instanceof Error ? e.message : "Unknown error";
+                            e instanceof Error
+                              ? e.message
+                              : t("modsModal.errors.unknown");
                           setProfilesError(message);
                         }
                       })();
@@ -1873,15 +2250,27 @@ const ModsModal: React.FC<{
                         try {
                           const dir = await ensureGameDir();
                           if (!selectedProfileName) return;
-                          await window.config.modsProfilesDelete(
+                          const res = await window.config.modsProfilesDelete(
                             dir,
                             selectedProfileName,
                           );
+                          if (res && (res as any).ok === false) {
+                            setProfilesError(
+                              formatModsError(
+                                res,
+                                "modsModal.errors.unknown",
+                              ),
+                            );
+                            return;
+                          }
                           setSelectedProfileName("");
+                          setProfileNameInput("");
                           await loadProfiles();
                         } catch (e) {
                           const message =
-                            e instanceof Error ? e.message : "Unknown error";
+                            e instanceof Error
+                              ? e.message
+                              : t("modsModal.errors.unknown");
                           setProfilesError(message);
                         }
                       })();
@@ -1925,7 +2314,7 @@ const ModsModal: React.FC<{
                   </div>
                 ) : null}
 
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2 flex items-center gap-2 relative">
                   <button
                     type="button"
                     className={cn(
@@ -1938,35 +2327,178 @@ const ModsModal: React.FC<{
                     )}
                     disabled={importing || shareWorking}
                     onClick={() => {
-                      void (async () => {
-                        setShareError("");
-                        setShareNotice("");
-                        setImportError("");
-                        setImportNotice("");
-                        try {
-                          const text = await readClipboardText();
-                          const pack = await decodeModPack(text);
-                          setImportPreviewPack(pack);
-                          setImportPreviewOpen(true);
-                        } catch (e) {
-                          const code =
-                            e instanceof Error ? e.message : "unknown";
-                          if (code === "invalid_prefix") {
-                            setImportError(
-                              t("modsModal.profiles.share.invalidFormat"),
-                            );
-                          } else {
-                            setImportError(
-                              t("modsModal.profiles.share.importFailed"),
-                            );
-                          }
-                        }
-                      })();
+                      setShareError("");
+                      setShareNotice("");
+                      setImportError("");
+                      setImportNotice("");
+                      setImportPromptError("");
+                      setImportPromptText("");
+                      setImportPromptOpen(true);
                     }}
                     title={t("modsModal.profiles.share.import")}
                   >
                     {t("modsModal.profiles.share.import")}
                   </button>
+
+                  {importPromptOpen ? (
+                    <>
+                      <div
+                        className="fixed inset-0 z-[9999]"
+                        onMouseDown={() => {
+                          setImportPromptOpen(false);
+                          setImportPromptError("");
+                        }}
+                      />
+
+                      <div
+                        className={cn(
+                          "absolute left-0 bottom-full mb-2 z-[10000]",
+                          "w-[560px] max-w-[92vw]",
+                          "rounded-lg border border-[#2a3146] bg-[#141824]/60 p-3",
+                        )}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <div className="text-xs text-white font-semibold">
+                            {t("modsModal.profiles.share.importPromptTitle")}
+                          </div>
+                          <button
+                            type="button"
+                            className="text-gray-300 hover:text-white transition-colors text-lg leading-none"
+                            onClick={() => {
+                              setImportPromptOpen(false);
+                              setImportPromptError("");
+                            }}
+                            title={t("common.close")}
+                          >
+                            ×
+                          </button>
+                        </div>
+
+                        <div className="text-[11px] text-gray-300 mb-2">
+                          {t("modsModal.profiles.share.importPromptHint")}
+                        </div>
+
+                        {importPromptError ? (
+                          <div className="text-xs text-red-300 mb-2">
+                            {importPromptError}
+                          </div>
+                        ) : null}
+
+                        <textarea
+                          value={importPromptText}
+                          onChange={(e) => {
+                            setImportPromptText(e.target.value);
+                            if (importPromptError) setImportPromptError("");
+                          }}
+                          placeholder={t(
+                            "modsModal.profiles.share.importPromptPlaceholder",
+                          )}
+                          className="w-full h-[92px] resize-none px-3 py-2 rounded-lg bg-[#0f1422]/70 border border-[#2a3146] text-white text-[11px] font-mono outline-none"
+                        />
+
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className={cn(
+                              "px-3 py-2 rounded-lg border border-[#2a3146]",
+                              "bg-transparent hover:bg-white/5 text-gray-200 transition",
+                              (importing || shareWorking) &&
+                                "opacity-60 cursor-not-allowed",
+                            )}
+                            disabled={importing || shareWorking}
+                            onClick={() => {
+                              void (async () => {
+                                setImportPromptError("");
+                                try {
+                                  const text = await readClipboardText();
+                                  setImportPromptText(text);
+                                  const pack = await decodeModPack(text);
+                                  setImportPreviewPack(pack);
+                                  setImportPreviewOpen(true);
+                                  setImportPromptOpen(false);
+                                } catch (e) {
+                                  const code =
+                                    e instanceof Error
+                                      ? e.message
+                                      : "unknown";
+                                  if (code === "invalid_prefix") {
+                                    setImportPromptError(
+                                      t(
+                                        "modsModal.profiles.share.invalidFormat",
+                                      ),
+                                    );
+                                  } else {
+                                    setImportPromptError(
+                                      t(
+                                        "modsModal.profiles.share.importFailed",
+                                      ),
+                                    );
+                                  }
+                                }
+                              })();
+                            }}
+                            title={t(
+                              "modsModal.profiles.share.importFromClipboard",
+                            )}
+                          >
+                            {t("modsModal.profiles.share.importFromClipboard")}
+                          </button>
+
+                          <button
+                            type="button"
+                            className={cn(
+                              "px-3 py-2 rounded-lg border border-blue-400/30",
+                              "bg-[linear-gradient(90deg,#0268D4_0%,#02D4D4_100%)] bg-[length:100%_100%] bg-no-repeat bg-left",
+                              "text-white text-sm font-bold",
+                              "hover:shadow-[0_0_18px_rgba(2,104,212,0.85)] transition",
+                              (!importPromptText.trim() ||
+                                importing ||
+                                shareWorking) &&
+                                "opacity-60 cursor-not-allowed",
+                            )}
+                            disabled={
+                              !importPromptText.trim() || importing || shareWorking
+                            }
+                            onClick={() => {
+                              void (async () => {
+                                setImportPromptError("");
+                                try {
+                                  const pack = await decodeModPack(
+                                    importPromptText,
+                                  );
+                                  setImportPreviewPack(pack);
+                                  setImportPreviewOpen(true);
+                                  setImportPromptOpen(false);
+                                } catch (e) {
+                                  const code =
+                                    e instanceof Error
+                                      ? e.message
+                                      : "unknown";
+                                  if (code === "invalid_prefix") {
+                                    setImportPromptError(
+                                      t(
+                                        "modsModal.profiles.share.invalidFormatText",
+                                      ),
+                                    );
+                                  } else {
+                                    setImportPromptError(
+                                      t(
+                                        "modsModal.profiles.share.importFailed",
+                                      ),
+                                    );
+                                  }
+                                }
+                              })();
+                            }}
+                            title={t("modsModal.profiles.share.importNow")}
+                          >
+                            {t("modsModal.profiles.share.importNow")}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               </div>
 
@@ -2164,7 +2696,7 @@ const ModsModal: React.FC<{
                                     const message =
                                       err instanceof Error
                                         ? err.message
-                                        : "Unknown error";
+                                        : t("modsModal.errors.unknown");
                                     setInstalledError(message);
                                   } finally {
                                     setInstalledLoading(false);
@@ -2227,7 +2759,8 @@ const ModsModal: React.FC<{
                           const profile = profiles.find(
                             (p) => p.name === selectedProfileName,
                           );
-                          if (!profile) throw new Error("Profile not found");
+                          if (!profile)
+                            throw new Error(t("modsModal.errors.profileNotFound"));
 
                           const registryItems = Object.values(registryByModId);
                           const registryByBase = new Map<
@@ -2247,6 +2780,7 @@ const ModsModal: React.FC<{
                           const gv = getSelectedGameVersionLabel();
 
                           const mods: ModPackV1["mods"] = [];
+                          const unattached: string[] = [];
                           for (const base of (profile.mods ?? []).filter(
                             Boolean,
                           )) {
@@ -2256,8 +2790,20 @@ const ModsModal: React.FC<{
                             const reg = registryByBase.get(baseKey) ?? null;
                             const cfEntry = profileCf?.[baseKey] ?? null;
 
+                            const modId = reg?.modId ?? cfEntry?.modId;
+                            const fileId =
+                              typeof reg?.fileId === "number"
+                                ? reg.fileId
+                                : cfEntry?.fileId;
+                            const canIntegrityCheckCurseforge =
+                              typeof modId === "number" &&
+                              modId > 0 &&
+                              typeof fileId === "number" &&
+                              fileId > 0;
+
                             let sha256: string | undefined;
-                            if (fileName) {
+                            // Only include sha256 when we can guarantee the importer downloads the same file.
+                            if (fileName && canIntegrityCheckCurseforge) {
                               try {
                                 const h = await window.config.modsFileHash(
                                   dir,
@@ -2280,11 +2826,6 @@ const ModsModal: React.FC<{
                                 typeof cfEntry.modId === "number" &&
                                 cfEntry.modId > 0)
                             ) {
-                              const modId = reg?.modId ?? cfEntry.modId;
-                              const fileId =
-                                typeof reg?.fileId === "number"
-                                  ? reg.fileId
-                                  : cfEntry?.fileId;
                               const fileNameFromReg =
                                 typeof reg?.fileName === "string"
                                   ? reg.fileName
@@ -2292,12 +2833,13 @@ const ModsModal: React.FC<{
                               mods.push({
                                 source: "curseforge",
                                 name: base,
-                                modId,
+                                modId: modId as number,
                                 fileId,
                                 fileName: fileNameFromReg,
                                 sha256,
                               });
                             } else {
+                              unattached.push(String(base));
                               mods.push({
                                 source: fileName ? "local" : "unknown",
                                 name: base,
@@ -2324,9 +2866,18 @@ const ModsModal: React.FC<{
 
                           const code = await encodeModPack(pack);
                           setExportCode(code);
-                          setShareNotice(
-                            t("modsModal.profiles.share.exportReady"),
-                          );
+                          if (unattached.length) {
+                            setShareNotice(
+                              `${t("modsModal.profiles.share.exportReady")} ${t(
+                                "modsModal.profiles.share.exportWarnUnattached",
+                                { count: unattached.length },
+                              )}`,
+                            );
+                          } else {
+                            setShareNotice(
+                              t("modsModal.profiles.share.exportReady"),
+                            );
+                          }
                         } catch (e) {
                           const message =
                             e instanceof Error
@@ -2542,7 +3093,7 @@ const ModsModal: React.FC<{
 
                 if (!res?.ok) {
                   errors.push(
-                    `${name}: ${String((res as any)?.error || "Download failed")}`,
+                    `${name}: ${formatModsError(res, "modsModal.errors.downloadFailed")}`,
                   );
                   continue;
                 }
@@ -2605,11 +3156,19 @@ const ModsModal: React.FC<{
                 cf[key] = entry;
               }
 
-              await window.config.modsProfilesSave(dir, {
+              const saveRes = await window.config.modsProfilesSave(dir, {
                 name: profileName,
                 mods: uniqueBases,
                 cf,
               });
+              if (saveRes && (saveRes as any).ok === false) {
+                throw new Error(
+                  formatModsError(
+                    saveRes,
+                    "modsModal.profiles.share.importFailed",
+                  ),
+                );
+              }
               await loadProfiles();
               setSelectedProfileName(profileName);
               setProfileSelectedMods(new Set(uniqueBases));
@@ -2641,12 +3200,174 @@ const ModsModal: React.FC<{
 
               await loadInstalled();
               await loadRegistry(dir);
-            } catch {
-              setImportError(t("modsModal.profiles.share.importFailed"));
+            } catch (e) {
+              const message =
+                e instanceof Error
+                  ? e.message
+                  : t("modsModal.profiles.share.importFailed");
+              setImportError(message);
             } finally {
               setInstallingId(null);
               setImportCurrent(null);
               setImporting(false);
+            }
+          })();
+        }}
+      />
+
+      <ConfirmModal
+        open={deleteModPrompt.open}
+        title={t("modsModal.installed.deleteConfirmTitle")}
+        message={
+          <div>
+            <div className="text-sm text-gray-200">
+              {t("modsModal.installed.deleteConfirmMsg", {
+                name: deleteModPrompt.fileName,
+              })}
+            </div>
+          </div>
+        }
+        confirmText={t("common.delete")}
+        cancelText={t("common.cancel")}
+        onCancel={() => {
+          setDeleteModPrompt({ open: false, fileName: "" });
+        }}
+        onConfirm={() => {
+          void (async () => {
+            if (!deleteModPrompt.fileName) return;
+
+            try {
+              setInstalledError("");
+              setUpdatesWorking(true);
+              const dir = await ensureGameDir();
+              const res = await window.config.modsInstalledDelete(
+                dir,
+                deleteModPrompt.fileName,
+              );
+              if (res && (res as any).ok === false) {
+                setInstalledError(
+                  formatModsError(res, "modsModal.errors.unknown"),
+                );
+                return;
+              }
+              setDeleteModPrompt({ open: false, fileName: "" });
+              await loadInstalled(false);
+            } catch (e) {
+              const message =
+                e instanceof Error ? e.message : t("modsModal.errors.unknown");
+              setInstalledError(message);
+            } finally {
+              setUpdatesWorking(false);
+            }
+          })();
+        }}
+      />
+
+      <ConfirmModal
+        open={attachPrompt.open}
+        title={t("modsModal.installed.attachToLauncher")}
+        message={
+          <div>
+            <div className="text-xs text-gray-200 mb-2">
+              {t("modsModal.installed.attachLinkLabel")}
+            </div>
+            <input
+              value={attachLinkInput}
+              onChange={(e) => {
+                const next = e.target.value;
+                setAttachLinkInput(next);
+                if (attachLinkError && isValidAttachLink(next)) {
+                  setAttachLinkError("");
+                }
+              }}
+              placeholder={t("modsModal.installed.attachLinkPlaceholder")}
+              className="w-full px-3 py-2 rounded-lg bg-[#141824]/80 border border-[#2a3146] text-white text-sm outline-none focus:border-blue-400/60"
+            />
+
+            {attachLinkError ? (
+              <div className="text-[11px] text-red-300 mt-2">
+                {attachLinkError}
+              </div>
+            ) : null}
+
+            <div className="text-[11px] text-gray-400 mt-2">
+              {t("modsModal.installed.attachLinkExample")}: {ATTACH_LINK_EXAMPLE}
+            </div>
+          </div>
+        }
+        confirmText={t("common.confirm")}
+        cancelText={t("common.cancel")}
+        onCancel={() => {
+          setAttachPrompt({ open: false, fileName: "" });
+          setAttachLinkInput("");
+          setAttachLinkError("");
+        }}
+        onConfirm={() => {
+          void (async () => {
+            try {
+              const dir = await ensureGameDir();
+              const link = attachLinkInput.trim();
+              if (!link) return;
+              if (!isValidAttachLink(link)) {
+                setAttachLinkError(
+                  t("modsModal.installed.attachLinkInvalid", {
+                    example: ATTACH_LINK_EXAMPLE,
+                  }),
+                );
+                return;
+              }
+              setInstalledError("");
+              setUpdatesWorking(true);
+              const res = await window.config.modsAttachManual(
+                dir,
+                attachPrompt.fileName,
+                link,
+              );
+              if (!res?.ok) {
+                if ((res as any)?.errorKey) {
+                  setInstalledError(
+                    formatModsError(res, "modsModal.installed.attachFailed"),
+                  );
+                  return;
+                }
+                const code = String((res as any)?.errorCode || "");
+                if (code === "ATTACH_INVALID_LINK") {
+                  setInstalledError(
+                    t("modsModal.installed.attachErrorInvalidLink", {
+                      example: ATTACH_LINK_EXAMPLE,
+                    }),
+                  );
+                } else if (code === "ATTACH_FILE_NOT_FOUND") {
+                  setInstalledError(
+                    t("modsModal.installed.attachErrorFileNotFound"),
+                  );
+                } else if (code === "ATTACH_MOD_NOT_FOUND") {
+                  setInstalledError(
+                    t("modsModal.installed.attachErrorModNotFound", {
+                      example: ATTACH_LINK_EXAMPLE,
+                    }),
+                  );
+                } else if (code === "MODS_SERVICE_UNREACHABLE") {
+                  setInstalledError(
+                    t("modsModal.installed.attachErrorService"),
+                  );
+                } else {
+                  setInstalledError(
+                    (res as any)?.error || t("modsModal.installed.attachFailed"),
+                  );
+                }
+                return;
+              }
+              setAttachPrompt({ open: false, fileName: "" });
+              setAttachLinkInput("");
+              setAttachLinkError("");
+              await loadInstalled(false);
+            } catch (e) {
+              const message =
+                e instanceof Error ? e.message : t("modsModal.errors.unknown");
+              setInstalledError(message);
+            } finally {
+              setUpdatesWorking(false);
             }
           })();
         }}

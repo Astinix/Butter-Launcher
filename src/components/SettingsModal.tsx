@@ -67,6 +67,8 @@ const SettingsModal: React.FC<{
 
   const [creditsOpen, setCreditsOpen] = useState(false);
 
+  const [clearingCache, setClearingCache] = useState(false);
+
   const [closing, setClosing] = useState(false);
 
   const normalizedUUID = useMemo(() => {
@@ -311,6 +313,30 @@ const SettingsModal: React.FC<{
       alert("Error #1000");
     } finally {
       setSteamDeckWorking(false);
+    }
+  };
+
+  const handleClearInstallCache = async () => {
+    if (clearingCache) return;
+    setClearingCache(true);
+    try {
+      const dir = gameDir ?? (await window.config.getDefaultGameDirectory());
+      const res = await window.config.clearInstallCache(dir);
+
+      if (!res || typeof res !== "object" || res.ok !== true) {
+        throw new Error("Failed");
+      }
+
+      if ((res.deleted ?? 0) > 0) {
+        alert(t("settings.cache.cleared", { count: res.deleted }));
+      } else {
+        alert(t("settings.cache.noneFound"));
+      }
+    } catch (e) {
+      console.error("Failed to clear install cache", e);
+      alert("Error #1000");
+    } finally {
+      setClearingCache(false);
     }
   };
 
@@ -603,6 +629,29 @@ const SettingsModal: React.FC<{
 
               <div className="text-[11px] text-gray-400">
                 {t("settings.onlinePatch.description")}
+              </div>
+            </div>
+
+            <div className="col-span-2 space-y-2">
+              <label className="text-xs uppercase tracking-widest text-gray-400">
+                {t("settings.cache.label")}
+              </label>
+              <button
+                type="button"
+                className={cn(
+                  "w-full flex items-center justify-between bg-[#1f2538] hover:bg-[#262d44] border border-[#2a3146] rounded-lg px-4 py-2 text-white transition disabled:opacity-60",
+                )}
+                disabled={clearingCache}
+                onClick={() => void handleClearInstallCache()}
+              >
+                <span className="text-sm">
+                  {clearingCache
+                    ? t("settings.cache.clearing")
+                    : t("settings.cache.clearButton")}
+                </span>
+              </button>
+              <div className="text-[11px] text-gray-400">
+                {t("settings.cache.description")}
               </div>
             </div>
 

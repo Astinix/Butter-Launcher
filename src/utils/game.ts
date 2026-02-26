@@ -110,17 +110,6 @@ const formatYMD = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
-const parseISODateOnly = (raw?: string): Date | null => {
-  if (!raw) return null;
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!iso) return null;
-  const y = Number(iso[1]);
-  const m = Number(iso[2]);
-  const d = Number(iso[3]);
-  const dt = new Date(y, m - 1, d);
-  return Number.isNaN(dt.getTime()) ? null : dt;
-};
-
 const startOfToday = () => {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -222,11 +211,23 @@ export const getGameVersions = async (versionType: VersionType = "release") => {
     const versionEntry = namesMap?.[buildIndex];
     const detailsEntry = versionEntry?.[os];
 
+    // Account-type gating:
+    // - Premium: respect manifest `available:false` (hide build)
+    // - No Premium: still show the build even if `available:false`
+    const accountType = (() => {
+      try {
+        return String(localStorage.getItem("accountType") || "").trim();
+      } catch {
+        return "";
+      }
+    })();
+    const isNoPremium = accountType.toLowerCase() === "nopremium";
+
     // Optional gating: if the manifest provides `available: false`, do not show the build.
     // If the field is missing, keep the build for backwards compatibility.
     const availableRaw =
       (detailsEntry as any)?.available ?? (versionEntry as any)?.available;
-    if (typeof availableRaw === "boolean" && availableRaw === false) {
+    if (!isNoPremium && typeof availableRaw === "boolean" && availableRaw === false) {
       return null;
     }
 

@@ -45,7 +45,7 @@ const Loader: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const dataRef = useRef<Uint8Array | null>(null);
   const stoppedRef = useRef(false);
 
   useEffect(() => {

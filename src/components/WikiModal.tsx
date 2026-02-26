@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IconX } from "@tabler/icons-react";
 import cn from "../utils/cn";
@@ -28,11 +28,173 @@ const WikiModal: React.FC<{
 }> = ({ open, initialUrl, onClose, onUrlChange }) => {
   const { t } = useTranslation();
   const webviewRef = useRef<any>(null);
+  const [currentUrl, setCurrentUrl] = useState<string>(WIKI_URL);
+  const [copied, setCopied] = useState(false);
+  const copiedTimeoutRef = useRef<number | null>(null);
+  const wikiCssInjectedRef = useRef(false);
+
+  const showCopied = () => {
+    setCopied(true);
+    if (copiedTimeoutRef.current) window.clearTimeout(copiedTimeoutRef.current);
+    copiedTimeoutRef.current = window.setTimeout(() => {
+      setCopied(false);
+      copiedTimeoutRef.current = null;
+    }, 1200);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onLinkCopied = () => {
+      showCopied();
+    };
+
+    try {
+      window.ipcRenderer?.on?.("wiki:link-copied", onLinkCopied as any);
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      try {
+        window.ipcRenderer?.off?.("wiki:link-copied", onLinkCopied as any);
+      } catch {
+        // ignore
+      }
+    };
+  }, [open]);
 
   const src = useMemo(() => {
     const candidate = typeof initialUrl === "string" ? initialUrl.trim() : "";
     return isWikiUrl(candidate) ? candidate : WIKI_URL;
   }, [initialUrl]);
+
+  useEffect(() => {
+    // Keep the displayed URL in sync with the webview navigation.
+    if (!open) return;
+
+    let active = true;
+    setCurrentUrl(src);
+
+    const w = webviewRef.current;
+    if (!w) return;
+
+    const update = (maybeUrl?: unknown) => {
+      if (!active) return;
+
+      const raw = typeof maybeUrl === "string" ? maybeUrl : w?.getURL?.();
+      if (typeof raw !== "string") return;
+      if (!isWikiUrl(raw)) return;
+
+      setCurrentUrl(raw);
+      try {
+        onUrlChange?.(raw);
+      } catch {
+        // ignore
+      }
+    };
+
+    const onDidNavigate = (ev: any) => update(ev?.url);
+    const onDidNavigateInPage = (ev: any) => update(ev?.url);
+    const injectWikiCss = () => {
+      if (wikiCssInjectedRef.current) return;
+      wikiCssInjectedRef.current = true;
+
+      try {
+        void w.insertCSS?.(`
+          html, body {
+            overflow-x: hidden !important;
+            max-width: 100vw !important;
+          }
+
+          /* Prevent common overflow culprits */
+          img, video, canvas, svg, iframe {
+            max-width: 100% !important;
+            height: auto !important;
+          }
+
+          pre, code {
+            white-space: pre-wrap !important;
+            word-break: break-word !important;
+            overflow-wrap: anywhere !important;
+          }
+
+          table {
+            max-width: 100% !important;
+          }
+        `);
+      } catch {
+        // ignore
+      }
+    };
+
+    const onDomReady = () => {
+      injectWikiCss();
+      update();
+    };
+
+    try {
+      w.addEventListener?.("did-navigate", onDidNavigate);
+      w.addEventListener?.("did-navigate-in-page", onDidNavigateInPage);
+      w.addEventListener?.("dom-ready", onDomReady);
+    } catch {
+      // ignore
+    }
+
+    // Best-effort initial sync.
+    const t0 = setTimeout(() => update(), 50);
+
+    return () => {
+      active = false;
+      clearTimeout(t0);
+      try {
+        w.removeEventListener?.("did-navigate", onDidNavigate);
+        w.removeEventListener?.("did-navigate-in-page", onDidNavigateInPage);
+        w.removeEventListener?.("dom-ready", onDomReady);
+      } catch {
+        // ignore
+      }
+    };
+  }, [open, src, onUrlChange]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimeoutRef.current != null) {
+        window.clearTimeout(copiedTimeoutRef.current);
+        copiedTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const copyCurrentUrl = async () => {
+    const url = String(currentUrl ?? "").trim();
+    if (!url) return;
+
+    try {
+      await navigator.clipboard.writeText(url);
+      showCopied();
+      return;
+    } catch {
+      // ignore
+    }
+
+    // Fallback: older Electron clipboard restrictions.
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = url;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      showCopied();
+    } catch {
+      // ignore
+    }
+  };
 
   const closeWithState = () => {
     try {
@@ -80,7 +242,40 @@ const WikiModal: React.FC<{
         </button>
 
         <div className="flex items-center justify-between gap-3 mb-3 pr-12">
-          <h2 className="text-lg font-semibold text-white tracking-wide">{t("launcher.buttons.wiki")}</h2>
+          <div className="w-full min-w-0">
+            <h2 className="text-lg font-semibold text-white tracking-wide">{t("launcher.buttons.wiki")}</h2>
+
+            <div className="mt-2 flex items-center gap-2 min-w-0">
+              <div className="shrink-0 text-[11px] text-white/60 font-semibold">
+                {t("wikiModal.currentUrl")}
+              </div>
+
+              <input
+                readOnly
+                value={currentUrl}
+                className={cn(
+                  "no-drag flex-1 min-w-0 px-3 py-1.5 rounded-md",
+                  "bg-black/25 border border-white/10",
+                  "text-[11px] text-white/85 font-mono",
+                  "outline-none focus:border-blue-400/60",
+                  "leading-tight",
+                  "cursor-pointer",
+                )}
+                onClick={() => void copyCurrentUrl()}
+                onFocus={(e) => e.currentTarget.select()}
+                title={t("wikiModal.copyHint")}
+              />
+
+              <div
+                className={cn(
+                  "shrink-0 w-16 text-right text-[11px] font-semibold",
+                  copied ? "text-green-300" : "text-transparent",
+                )}
+              >
+                {t("common.copied")}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="flex-1 min-h-0 rounded-lg overflow-hidden border border-white/10 bg-black/20">

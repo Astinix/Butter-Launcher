@@ -50,6 +50,26 @@
   scrollbar-color: rgba(59, 130, 246, 0.7) transparent;
 }
 
+/* Minimal scrollbars (Chromium/WebKit) */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.60);
+}
+
 body::-webkit-scrollbar {
   width: 0px;
   background: transparent;
@@ -62,8 +82,8 @@ body::-webkit-scrollbar {
 }
 
 .dark-scrollbar::-webkit-scrollbar {
-  height: 10px;
-  width: 10px;
+  height: 6px;
+  width: 6px;
 }
 
 .dark-scrollbar::-webkit-scrollbar-track {
@@ -74,7 +94,7 @@ body::-webkit-scrollbar {
 .dark-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.60);
   border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .dark-scrollbar::-webkit-scrollbar-thumb:hover {
@@ -82,9 +102,17 @@ body::-webkit-scrollbar {
 }
 
 #frame {
+  -webkit-app-region: drag;
   app-region: drag;
 }
 #frame button {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Electron: allow clicks/typing inside draggable windows */
+.no-drag {
+  -webkit-app-region: no-drag;
   app-region: no-drag;
 }
 

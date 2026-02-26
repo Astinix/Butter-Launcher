@@ -165,14 +165,14 @@ export const launchGame = async (
   // - If online patch is enabled and proper_patch === false => authenticated + tokens
   // - If online patch is enabled and proper_patch === true  => offline
   // Compatibility fallback (when proper_patch is missing):
-  // - Legacy behavior was Linux/macOS authenticated when patched.
+  // - Default to authenticated when patched.
   const useAuthenticated =
     accountType === "premium"
       ? !forceOfflineAuth
       : !forceOfflineAuth &&
         patchEnabled &&
         ((hasProperPatchFlag && version.proper_patch === false) ||
-          (!hasProperPatchFlag && process.platform !== "win32"));
+          !hasProperPatchFlag);
   // Nothing says "fun" like having two auth modes and three operating systems ;w;
   // And now a third input: "the internet is down". Perfect.
 

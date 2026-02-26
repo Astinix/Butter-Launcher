@@ -25,6 +25,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   const { t } = useTranslation();
   const resolvedConfirmText = confirmText ?? t("common.confirm");
   const resolvedCancelText = cancelText ?? t("common.cancel");
+  const mouseDownOnBackdrop = React.useRef(false);
 
   if (!open) return null;
 
@@ -35,7 +36,23 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   return createPortal(
     <div
       className="fixed inset-0 z-[1000] flex items-center justify-center glass-backdrop animate-fadeIn"
-      onClick={onCancel}
+      onMouseDown={(e) => {
+        mouseDownOnBackdrop.current = e.target === e.currentTarget;
+      }}
+      onMouseUp={() => {
+        mouseDownOnBackdrop.current = false;
+      }}
+      onMouseLeave={() => {
+        mouseDownOnBackdrop.current = false;
+      }}
+      onClick={(e) => {
+        // Only close when the click started on the backdrop itself.
+        // This prevents "click-drag-release outside" from closing the modal.
+        if (mouseDownOnBackdrop.current && e.target === e.currentTarget) {
+          onCancel();
+        }
+        mouseDownOnBackdrop.current = false;
+      }}
     >
       <div
         className="relative w-full max-w-md rounded-xl shadow-2xl bg-linear-to-b from-[#1b2030]/95 to-[#141824]/95 border border-[#2a3146] p-6 animate-settings-in"

@@ -6,6 +6,7 @@ import {
   nativeImage,
   Tray,
   Menu,
+  clipboard,
   dialog,
   session,
 } from "electron";
@@ -61,6 +62,7 @@ import {
 } from "./utils/mods/curseforge";
 
 import {
+  getGameRootDir,
   getLatestDir,
   getPreReleaseBuildDir,
   getPreReleaseChannelDir,
@@ -674,8 +676,11 @@ const syncPremiumLauncherProfileBestEffort = async (): Promise<void> => {
     const dbgRaw = String(process.env.HYTALE_PREMIUM_HTTP_DEBUG ?? process.env.PREMIUM_HTTP_DEBUG ?? "").trim().toLowerCase();
     const dbg = dbgRaw === "1" || dbgRaw === "true" || dbgRaw === "yes" || dbgRaw === "on";
 
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 6_000);
     const res = await fetch(url, {
       method: "GET",
+      signal: ctrl.signal,
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "User-Agent": premiumLauncherUa(),
@@ -684,6 +689,12 @@ const syncPremiumLauncherProfileBestEffort = async (): Promise<void> => {
         Accept: "application/json",
         "Accept-Encoding": "gzip",
       },
+    }).finally(() => {
+      try {
+        clearTimeout(timeout);
+      } catch {
+        // ignore
+      }
     });
 
     if (dbg) {
@@ -995,6 +1006,10 @@ let networkBlockerInstalled = false;
 let isGameRunning = false;
 let runningGameBuildKey: string | null = null;
 
+const isHostServerRunning = (): boolean => {
+  return !!(hostServerProc && !hostServerProc.killed);
+};
+
 // Prevent overlapping online patch operations (double-click spam / race conditions).
 const onlinePatchInFlight = new Set<string>();
 
@@ -1034,14 +1049,49 @@ const installBackgroundNetworkBlocker = (w: BrowserWindow) => {
   });
 };
 
-function resolveAppIcon() {
-  const iconFile = path.join(
-    process.env.APP_ROOT,
-    "build",
-    process.platform === "win32" ? "icon.ico" : "icon.png",
-  );
+function resolveAppIcon(): Electron.NativeImage | null {
+  const namePrimary = process.platform === "win32" ? "icon.ico" : "icon.png";
+  const nameFallback = process.platform === "win32" ? "icon.png" : "icon.png";
 
-  return nativeImage.createFromPath(iconFile);
+  const bases = [
+    String(process.env.APP_ROOT ?? ""),
+    // Packaged apps typically live under resources/app.asar
+    (() => {
+      try {
+        return app.getAppPath();
+      } catch {
+        return "";
+      }
+    })(),
+    // Additional fallbacks for electron-builder layouts.
+    String(process.resourcesPath ?? ""),
+    path.join(String(process.resourcesPath ?? ""), "app.asar"),
+    path.join(String(process.resourcesPath ?? ""), "app.asar.unpacked"),
+  ].filter((s) => !!s && s !== "undefined" && s !== "null");
+
+  const tryLoad = (base: string, fileName: string): Electron.NativeImage | null => {
+    try {
+      const p = path.join(base, "build", fileName);
+      const img = nativeImage.createFromPath(p);
+      if (img && !img.isEmpty()) return img;
+    } catch {
+      // ignore
+    }
+    return null;
+  };
+
+  for (const base of bases) {
+    const primary = tryLoad(base, namePrimary);
+    if (primary) return primary;
+  }
+
+  // Windows: some environments fail to load multi-size ICOs; fall back to PNG.
+  for (const base of bases) {
+    const fb = tryLoad(base, nameFallback);
+    if (fb) return fb;
+  }
+
+  return null;
 }
 
 const restoreFromBackground = () => {
@@ -1069,7 +1119,7 @@ const ensureTray = () => {
 
   const icon = resolveAppIcon();
   // Tray requires an image; if missing, create a transparent placeholder.
-  const trayIcon = icon ?? nativeImage.createEmpty();
+  const trayIcon = icon && !icon.isEmpty() ? icon : nativeImage.createEmpty();
 
   try {
     tray = new Tray(trayIcon);
@@ -1240,6 +1290,54 @@ const installWikiWebviewGuards = () => {
       contents.on("will-redirect", (event, url) => {
         if (!isAllowedWikiUrl(url)) event.preventDefault();
       });
+
+      // Right-click menu: allow copying link URLs from inside the wiki webview.
+      contents.on("context-menu", (event, params) => {
+        try {
+          const linkUrlRaw = typeof (params as any)?.linkURL === "string" ? (params as any).linkURL : "";
+          const linkUrl = String(linkUrlRaw ?? "").trim();
+          if (!linkUrl) return;
+
+          // Only handle http(s) links.
+          let protocolOk = false;
+          try {
+            const u = new URL(linkUrl);
+            protocolOk = u.protocol === "https:" || u.protocol === "http:";
+          } catch {
+            protocolOk = false;
+          }
+          if (!protocolOk) return;
+
+          event.preventDefault();
+
+          const owner = (contents as any)?.getOwnerBrowserWindow?.() ?? null;
+          const popupWindow = owner ?? win ?? null;
+          if (!popupWindow) return;
+
+          const menu = Menu.buildFromTemplate([
+            {
+              label: "Copy",
+              click: () => {
+                try {
+                  clipboard.writeText(linkUrl);
+                } catch {
+                  // ignore
+                }
+
+                try {
+                  popupWindow.webContents.send("wiki:link-copied", { url: linkUrl });
+                } catch {
+                  // ignore
+                }
+              },
+            },
+          ]);
+
+          menu.popup({ window: popupWindow });
+        } catch {
+          // ignore
+        }
+      });
     } catch {
       // ignore
     }
@@ -1280,6 +1378,7 @@ app.on("before-quit", (e) => {
 
 function createWindow() {
   const icon = resolveAppIcon();
+  const windowIcon = icon && !icon.isEmpty() ? icon : null;
 
   // frame: false means we get to reinvent window controls. What could go wrong.
   win = new BrowserWindow({
@@ -1290,7 +1389,7 @@ function createWindow() {
     resizable: true,
     maximizable: true,
     backgroundColor: "#00000000",
-    ...(icon ? { icon } : {}),
+    ...(windowIcon ? { icon: windowIcon } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
       webviewTag: true,
@@ -1303,11 +1402,12 @@ function createWindow() {
 
   // Close behavior:
   // - If Hytale is running, close should move the launcher to background/tray.
+  // - If the local host server is running, close should move the launcher to background/tray.
   // - If no Hytale client is running, close should actually quit the launcher.
   win.on("close", (e) => {
     if (isQuitting) return;
 
-    if (isGameRunning) {
+    if (isGameRunning || isHostServerRunning()) {
       e.preventDefault();
       moveToBackground();
       return;
@@ -1473,6 +1573,407 @@ ipcMain.handle("fetch:head", async (_, url, ...args) => {
   const response = await fetch(url, ...args);
   return response.status;
 });
+
+ipcMain.handle(
+  "matcha:avatar:sync",
+  async (
+    _,
+    payload: {
+      gameDir: string;
+      token: string;
+      accountType?: string | null;
+      username?: string | null;
+      uuid?: string | null;
+      customUUID?: string | null;
+      bgColor?: string | null;
+      lastHash?: string | null;
+      force?: boolean;
+    },
+  ): Promise<
+    | {
+        ok: true;
+        uuid: string;
+        hash: string;
+        uploaded: boolean;
+        skipped: boolean;
+        reason?: string | null;
+      }
+    | { ok: false; error: string; uuid?: string | null; hash?: string | null }
+  > => {
+    try {
+      const gameDir = String(payload?.gameDir ?? "").trim();
+      const token = String(payload?.token ?? "").trim();
+      const accountType = String(payload?.accountType ?? "").trim();
+      const username = String(payload?.username ?? "").trim();
+      const uuidOverride =
+        typeof payload?.uuid === "string" ? payload.uuid.trim() : "";
+      const customUUID =
+        typeof payload?.customUUID === "string"
+          ? payload.customUUID.trim()
+          : null;
+      const lastHash =
+        typeof payload?.lastHash === "string" ? payload.lastHash.trim() : "";
+      const force = !!payload?.force;
+
+      const bgColorRaw =
+        typeof payload?.bgColor === "string" ? payload.bgColor.trim() : "";
+
+      if (!gameDir) return { ok: false, error: "Missing gameDir" };
+      if (!token) return { ok: false, error: "Missing token" };
+
+      const normalizeUuid = (raw: string): string | null => {
+        const trimmed = String(raw ?? "").trim();
+        if (!trimmed) return null;
+
+        const compact = trimmed.replace(/-/g, "");
+        if (/^[0-9a-fA-F]{32}$/.test(compact)) {
+          const lower = compact.toLowerCase();
+          return `${lower.slice(0, 8)}-${lower.slice(8, 12)}-${lower.slice(12, 16)}-${lower.slice(16, 20)}-${lower.slice(20)}`;
+        }
+
+        if (
+          /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+            trimmed,
+          )
+        ) {
+          return trimmed.toLowerCase();
+        }
+
+        return null;
+      };
+
+      const resolvePremiumUuidBestEffort = async (): Promise<string | null> => {
+        try {
+          const rec = readPremiumAuth();
+          const fromRec = normalizeOfficialUuid((rec as any)?.profile?.uuid);
+          if (fromRec) return fromRec;
+        } catch {
+          // ignore
+        }
+
+        try {
+          await syncPremiumLauncherProfileBestEffort();
+        } catch {
+          // ignore
+        }
+
+        try {
+          const rec2 = readPremiumAuth();
+          const fromRec2 = normalizeOfficialUuid((rec2 as any)?.profile?.uuid);
+          return fromRec2;
+        } catch {
+          return null;
+        }
+      };
+
+      const uuid = (() => {
+        if (uuidOverride) return uuidOverride;
+        return "";
+      })();
+
+      const finalUuid =
+        uuid ||
+        (accountType === "premium"
+          ? await resolvePremiumUuidBestEffort()
+          : username
+            ? normalizeUuid(customUUID || "") ?? genUUID(username)
+            : null);
+
+      if (!finalUuid) {
+        return {
+          ok: false,
+          error:
+            accountType === "premium"
+              ? "Premium profile UUID not available (login required)"
+              : "Missing username",
+        };
+      }
+
+      const previewsDir = path.join(
+        gameDir,
+        "UserData",
+        "CachedAvatarPreviews",
+      );
+
+      if (!fs.existsSync(previewsDir)) {
+        return {
+          ok: false,
+          error: "CachedAvatarPreviews folder not found",
+          uuid: finalUuid,
+        };
+      }
+
+      const resolveAvatarPreviewPath = (dir: string, id: string): string | null => {
+        const withDashes = id.toLowerCase();
+        const noDashes = withDashes.replace(/-/g, "");
+        const directCandidates = [
+          withDashes,
+          `${withDashes}.png`,
+          `${withDashes}.jpg`,
+          `${withDashes}.jpeg`,
+          `${withDashes}.webp`,
+          noDashes,
+          `${noDashes}.png`,
+          `${noDashes}.jpg`,
+          `${noDashes}.jpeg`,
+          `${noDashes}.webp`,
+        ];
+
+        for (const name of directCandidates) {
+          const p = path.join(dir, name);
+          try {
+            if (fs.existsSync(p) && fs.statSync(p).isFile()) return p;
+          } catch {
+            // ignore
+          }
+        }
+
+        // Fallback: scan directory for a matching basename.
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const e of entries) {
+            if (!e.isFile()) continue;
+            const base = e.name.toLowerCase();
+            if (base === withDashes || base === noDashes) return path.join(dir, e.name);
+            if (base.startsWith(withDashes + ".") || base.startsWith(noDashes + ".")) {
+              return path.join(dir, e.name);
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        return null;
+      };
+
+      const sourcePath = resolveAvatarPreviewPath(previewsDir, finalUuid);
+      if (!sourcePath) {
+        return { ok: false, error: "Avatar preview not found", uuid: finalUuid };
+      }
+
+      const img = nativeImage.createFromPath(sourcePath);
+      if (img.isEmpty()) {
+        return { ok: false, error: "Failed to read avatar preview", uuid: finalUuid };
+      }
+
+      const size = img.getSize();
+      const width = Math.max(0, Math.floor(size.width));
+      const height = Math.max(0, Math.floor(size.height));
+      if (!width || !height) {
+        return { ok: false, error: "Invalid avatar preview image", uuid: finalUuid };
+      }
+
+      const side = Math.min(width, height);
+      const cropX = Math.max(0, Math.floor((width - side) / 2));
+      const cropY = 0; // crop from top
+
+      let cropped = img.crop({ x: cropX, y: cropY, width: side, height: side });
+      if (side > 512) {
+        cropped = cropped.resize({ width: 512, height: 512 });
+      }
+
+      const parseHexRgb = (raw: string): { r: number; g: number; b: number } | null => {
+        const s = String(raw ?? "").trim();
+        if (!s) return null;
+        const m = s.match(/^#?([0-9a-fA-F]{6})$/);
+        if (!m) return null;
+        const hex = m[1];
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        if (![r, g, b].every((x) => Number.isFinite(x))) return null;
+        return { r, g, b };
+      };
+
+      // User-selectable background replacement: the cached previews have a solid background.
+      // We can't change the game client, but we can recolor that solid bg before uploading.
+      const targetBg = parseHexRgb(bgColorRaw);
+      if (targetBg) {
+        const srcBg = { r: 0x2f, g: 0x3a, b: 0x4f }; // #2F3A4F
+        const tol = 6;
+        const s = cropped.getSize();
+        const w = Math.max(0, Math.floor(s.width));
+        const h = Math.max(0, Math.floor(s.height));
+        if (w > 0 && h > 0) {
+          try {
+            const bmp = cropped.toBitmap();
+            const out = Buffer.from(bmp);
+            for (let i = 0; i + 3 < out.length; i += 4) {
+              const b = out[i];
+              const g = out[i + 1];
+              const r = out[i + 2];
+              const a = out[i + 3];
+              if (a < 250) continue;
+              if (
+                Math.abs(r - srcBg.r) <= tol &&
+                Math.abs(g - srcBg.g) <= tol &&
+                Math.abs(b - srcBg.b) <= tol
+              ) {
+                out[i] = targetBg.b;
+                out[i + 1] = targetBg.g;
+                out[i + 2] = targetBg.r;
+                out[i + 3] = 255;
+              }
+            }
+            cropped = nativeImage.createFromBitmap(out, { width: w, height: h });
+          } catch {
+            // ignore recolor failures
+          }
+        }
+      }
+
+      const png = cropped.toPNG();
+      const hash = crypto.createHash("sha256").update(png).digest("hex");
+
+      if (!force && lastHash && lastHash === hash) {
+        return {
+          ok: true,
+          uuid: finalUuid,
+          hash,
+          uploaded: false,
+          skipped: true,
+          reason: "unchanged",
+        };
+      }
+
+      const apiBase = "https://butter.lat";
+      const uploadUrl = new URL("/api/matcha/avatar", apiBase).toString();
+
+      const uploadCtrl = new AbortController();
+      const uploadTimeout = setTimeout(() => uploadCtrl.abort(), 12_000);
+      const resp = await fetch(uploadUrl, {
+        method: "POST",
+        signal: uploadCtrl.signal,
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "image/png",
+          "x-avatar-hash": hash,
+          ...(force ? { "x-avatar-force": "1" } : {}),
+          ...(force ? { "x-avatar-enable": "1" } : {}),
+          "cache-control": "no-store",
+        },
+        body: png,
+      }).finally(() => {
+        try {
+          clearTimeout(uploadTimeout);
+        } catch {
+          // ignore
+        }
+      });
+
+      const json: any = await resp
+        .json()
+        .catch(() => ({ ok: false, error: `HTTP ${resp.status}` }));
+
+      if (!resp.ok || !json || json.ok !== true) {
+        const err =
+          typeof json?.error === "string" && json.error.trim()
+            ? json.error
+            : `Upload failed (HTTP ${resp.status})`;
+        return { ok: false, error: err, uuid: finalUuid, hash };
+      }
+
+      return {
+        ok: true,
+        uuid: finalUuid,
+        hash,
+        uploaded: !!json.changed,
+        skipped: !json.changed,
+        reason: json.changed ? "uploaded" : "server_unchanged",
+      };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unknown error";
+      return { ok: false, error: message };
+    }
+  },
+);
+
+ipcMain.handle(
+  "matcha:avatar:uploadCustom",
+  async (
+    _,
+    payload: { token: string; filePath: string },
+  ): Promise<
+    | { ok: true; hash: string; uploaded: boolean; skipped: boolean; reason?: string | null }
+    | { ok: false; error: string }
+  > => {
+    try {
+      const token = String(payload?.token ?? "").trim();
+      const filePath = String(payload?.filePath ?? "").trim();
+      if (!token) return { ok: false, error: "Missing token" };
+      if (!filePath) return { ok: false, error: "Missing file" };
+
+      let st: fs.Stats | null = null;
+      try {
+        st = fs.statSync(filePath);
+      } catch {
+        st = null;
+      }
+      if (!st || !st.isFile()) return { ok: false, error: "File not found" };
+      if (st.size > 1024 * 1024) return { ok: false, error: "File too large" };
+
+      const img = nativeImage.createFromPath(filePath);
+      if (img.isEmpty()) return { ok: false, error: "Unsupported image" };
+      const size = img.getSize();
+      const w = Math.max(0, Math.floor(size.width));
+      const h = Math.max(0, Math.floor(size.height));
+      if (w !== 92 || h !== 92) return { ok: false, error: "Avatar must be 92x92" };
+
+      const png = img.toPNG();
+      if (!png || png.length < 16) return { ok: false, error: "Invalid image" };
+      if (png.length > 1024 * 1024) return { ok: false, error: "Avatar too large" };
+
+      const hash = crypto.createHash("sha256").update(png).digest("hex");
+
+      const apiBase = "https://butter.lat";
+      const uploadUrl = new URL("/api/matcha/avatar/custom", apiBase).toString();
+
+      const uploadCtrl = new AbortController();
+      const uploadTimeout = setTimeout(() => uploadCtrl.abort(), 12_000);
+      const resp = await fetch(uploadUrl, {
+        method: "POST",
+        signal: uploadCtrl.signal,
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "image/png",
+          "x-avatar-hash": hash,
+          "x-avatar-enable": "1",
+          "cache-control": "no-store",
+        },
+        body: png,
+      }).finally(() => {
+        try {
+          clearTimeout(uploadTimeout);
+        } catch {
+          // ignore
+        }
+      });
+
+      const json: any = await resp
+        .json()
+        .catch(() => ({ ok: false, error: `HTTP ${resp.status}` }));
+
+      if (!resp.ok || !json || json.ok !== true) {
+        const err =
+          typeof json?.error === "string" && json.error.trim()
+            ? json.error
+            : `Upload failed (HTTP ${resp.status})`;
+        return { ok: false, error: err };
+      }
+
+      return {
+        ok: true,
+        hash,
+        uploaded: !!json.changed,
+        skipped: !json.changed,
+        reason: json.changed ? "uploaded" : "server_unchanged",
+      };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unknown error";
+      return { ok: false, error: message };
+    }
+  },
+);
 
 ipcMain.handle("premium:status", async () => {
   try {
@@ -1999,6 +2500,145 @@ const deleteModFileBestEffort = async (gameDir: string, fileName: string) => {
   }
 };
 
+const stripDisabledSuffix = (fileName: string) =>
+  fileName.endsWith(".disabled")
+    ? fileName.slice(0, -".disabled".length)
+    : fileName;
+
+const fileExists = async (p: string): Promise<boolean> => {
+  try {
+    await fs.promises.access(p, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isInstalledModDisabled = async (gameDir: string, registryFileName: string): Promise<boolean> => {
+  const safe = assertSafeFileName(registryFileName);
+  if (safe.endsWith(".disabled")) return true;
+  const modsDir = getModsDir(gameDir);
+  const enabledPath = path.join(modsDir, safe);
+  const disabledPath = path.join(modsDir, `${safe}.disabled`);
+  const hasEnabled = await fileExists(enabledPath);
+  if (hasEnabled) return false;
+  const hasDisabled = await fileExists(disabledPath);
+  return hasDisabled;
+};
+
+const ensureDisabledStateForDownloadedFile = async (
+  gameDir: string,
+  downloadedFileName: string,
+  disabled: boolean,
+): Promise<void> => {
+  const modsDir = getModsDir(gameDir);
+  const safe = assertSafeFileName(downloadedFileName);
+  const enabledPath = path.join(modsDir, safe);
+  const disabledPath = path.join(modsDir, `${safe}.disabled`);
+
+  if (!disabled) return;
+  // On Windows, rename won't overwrite. Remove the old disabled file first.
+  try {
+    await fs.promises.unlink(disabledPath);
+  } catch {
+    // ignore
+  }
+  await fs.promises.rename(enabledPath, disabledPath);
+};
+
+const parseCurseForgeSlugFromUrl = (raw: string): string | null => {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!s) return null;
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase();
+  if (host !== "www.curseforge.com" && host !== "curseforge.com") return null;
+
+  const parts = u.pathname
+    .split("/")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  // Expect: /hytale/mods/<slug>
+  const modsIdx = parts.findIndex((p) => p.toLowerCase() === "mods");
+  if (modsIdx < 0) return null;
+  const slug = parts[modsIdx + 1] ?? "";
+  const clean = slug.trim().toLowerCase();
+  if (!clean) return null;
+  if (!/^[a-z0-9\-_.]+$/.test(clean)) return null;
+  return clean;
+};
+
+const resolveCurseForgeModIdFromUrl = async (curseforgeUrl: string): Promise<number> => {
+  const slug = parseCurseForgeSlugFromUrl(curseforgeUrl);
+  if (!slug) throw new Error("Invalid CurseForge link");
+
+  // Search returns ids; we confirm by fetching details to match the slug.
+  // Slugs often don't match mod names 1:1, so we try a few query variants.
+  const queries = Array.from(
+    new Set([
+      slug,
+      slug.replace(/[-_.]+/g, " ").trim(),
+      slug.replace(/[-_.]+/g, "").trim(),
+    ]),
+  ).filter(Boolean);
+
+  for (const q of queries) {
+    const { mods } = await browseMods({ query: q, sort: "relevance", index: 0, pageSize: 50 });
+    const candidates = Array.isArray(mods) ? mods : [];
+
+    for (const c of candidates.slice(0, 30)) {
+      const id = Number((c as any)?.id);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      try {
+        const details = await getModDetails(id);
+        const gotSlug =
+          typeof (details as any)?.slug === "string"
+            ? String((details as any).slug).toLowerCase()
+            : "";
+        if (gotSlug && gotSlug === slug) return id;
+      } catch {
+        // ignore per-candidate errors
+      }
+    }
+  }
+
+  throw new Error("Couldn't resolve mod from CurseForge link");
+};
+
+const pickLatestStableFileId = async (modId: number): Promise<number | null> => {
+  // IMPORTANT: Updates must be stable-only (releaseType=1). If no stable file exists, we skip updates.
+  const files = await getModFiles(modId, 25);
+  const stable = files.find(
+    (f) => typeof f?.releaseType === "number" && Number(f.releaseType) === 1,
+  );
+  const id = Number(stable?.id);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return id;
+};
+
+const pickLatestStableFileInfo = async (
+  modId: number,
+): Promise<{ fileId: number | null; name: string; fileName: string }> => {
+  const files = await getModFiles(modId, 25);
+  const stable = files.find(
+    (f) => typeof f?.releaseType === "number" && Number(f.releaseType) === 1,
+  );
+  const fileId = stable?.id != null ? Number(stable.id) : NaN;
+  const resolvedId = Number.isFinite(fileId) && fileId > 0 ? fileId : null;
+  const name =
+    typeof stable?.displayName === "string" && stable.displayName.trim()
+      ? stable.displayName.trim()
+      : typeof stable?.fileName === "string" && stable.fileName.trim()
+        ? stable.fileName.trim()
+        : "";
+  const fileName = typeof stable?.fileName === "string" ? stable.fileName.trim() : "";
+  return { fileId: resolvedId, name, fileName };
+};
+
 type ModProfile = {
   name: string;
   mods: string[]; // file base names (no .disabled)
@@ -2121,20 +2761,36 @@ const assertSafeFileName = (name: unknown): string => {
   return s;
 };
 
-const toUserFacingModsError = (e: unknown): string => {
-  const raw = e instanceof Error ? e.message : "Unknown error";
-  const lower = raw.toLowerCase();
+const toModsErrorKey = (e: unknown): { errorKey: string; errorArgs?: Record<string, any> } => {
+  const raw = e instanceof Error ? e.message : "";
+  const lower = String(raw || "").toLowerCase();
 
-  // Don't leak internal config/env guidance to end-users.
+  // Config / API key / baseUrl issues.
   if (
-    lower.includes("curseforge api key not configured") ||
+    lower.includes("mods are unavailable") ||
+    lower.includes("curseforge api key") ||
     lower.includes("butter_mods_config_url") ||
     lower.includes("x-api-key")
   ) {
-    return "Mods are unavailable right now. Please check your internet connection and try again.";
+    return { errorKey: "modsModal.errors.unavailable" };
   }
 
-  // Collapse most CF/network-ish failures into a user-friendly message.
+  // Not a network issue.
+  if (
+    lower.includes("invalid curseforge link") ||
+    lower.includes("couldn't resolve mod from curseforge link")
+  ) {
+    return {
+      errorKey: "modsModal.errors.modNotFoundFromLink",
+      errorArgs: { example: "https://www.curseforge.com/hytale/mods/example" },
+    };
+  }
+
+  if (lower.includes("download failed")) {
+    return { errorKey: "modsModal.errors.downloadFailed" };
+  }
+
+  // Network-ish / CF-ish.
   if (
     lower.includes("curseforge") ||
     lower.includes("fetch failed") ||
@@ -2145,15 +2801,17 @@ const toUserFacingModsError = (e: unknown): string => {
     lower.includes("network") ||
     lower.includes("tls")
   ) {
-    return "We couldn't reach the mods service. Please check your internet connection and try again.";
+    return { errorKey: "modsModal.errors.serviceUnreachable" };
   }
 
-  if (lower.includes("download failed")) {
-    return "Download failed. Please check your internet connection and try again.";
-  }
-
-  return raw || "Something went wrong. Please try again.";
+  return { errorKey: "modsModal.errors.unknown" };
 };
+
+const modsFail = (
+  errorKey: string,
+  errorArgs?: Record<string, any>,
+  errorCode?: string,
+) => ({ ok: false as const, errorKey, errorArgs, errorCode });
 
 ipcMain.handle("mods:search", async (_, query?: string) => {
   try {
@@ -2162,8 +2820,8 @@ ipcMain.handle("mods:search", async (_, query?: string) => {
     const mods = await searchMods(q);
     return { ok: true, mods, error: null as string | null };
   } catch (e) {
-    const message = toUserFacingModsError(e);
-    return { ok: false, mods: [], error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), mods: [], error: null as string | null };
   }
 });
 
@@ -2186,28 +2844,28 @@ ipcMain.handle(
       const res = await browseMods({ query, sort: sort as any, index, pageSize });
       return { ok: true, mods: res.mods, pagination: res.pagination, error: null as string | null };
     } catch (e) {
-      const message = toUserFacingModsError(e);
-      return { ok: false, mods: [], pagination: null, error: message };
+      const { errorKey, errorArgs } = toModsErrorKey(e);
+      return { ...modsFail(errorKey, errorArgs), mods: [], pagination: null, error: null as string | null };
     }
   },
 );
 
 ipcMain.handle("mods:registry", async (_, gameDir: string) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, items: [], error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), items: [], error: null as string | null };
   try {
     const items = await readModsRegistry(dir);
     return { ok: true, items, error: null as string | null };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, items: [], error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), items: [], error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:details", async (_, modId: number) => {
   const id = Number(modId);
   if (!Number.isFinite(id) || id <= 0) {
-    return { ok: false, mod: null, html: "", files: [], error: "Invalid mod id" };
+    return { ...modsFail("modsModal.errors.invalidModId"), mod: null, html: "", files: [], error: null as string | null };
   }
 
   try {
@@ -2218,28 +2876,28 @@ ipcMain.handle("mods:details", async (_, modId: number) => {
     ]);
     return { ok: true, mod, html, files, error: null as string | null };
   } catch (e) {
-    const message = toUserFacingModsError(e);
-    return { ok: false, mod: null, html: "", files: [], error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), mod: null, html: "", files: [], error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:description", async (_, modId: number) => {
   const id = Number(modId);
-  if (!Number.isFinite(id) || id <= 0) return { ok: false, html: "", error: "Invalid mod id" };
+  if (!Number.isFinite(id) || id <= 0) return { ...modsFail("modsModal.errors.invalidModId"), html: "", error: null as string | null };
   try {
     const html = await getModDescriptionHtml(id);
     return { ok: true, html };
   } catch (e) {
-    const message = toUserFacingModsError(e);
-    return { ok: false, html: "", error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), html: "", error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:install", async (event, modId: number, gameDir: string) => {
   const id = Number(modId);
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!Number.isFinite(id) || id <= 0) return { ok: false, error: "Invalid mod id" };
-  if (!dir) return { ok: false, error: "Invalid gameDir" };
+  if (!Number.isFinite(id) || id <= 0) return { ...modsFail("modsModal.errors.invalidModId"), error: null as string | null };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
 
   try {
     const prev = (await readModsRegistry(dir)).find((x) => x.modId === id) ?? null;
@@ -2263,9 +2921,9 @@ ipcMain.handle("mods:install", async (event, modId: number, gameDir: string) => 
     event.sender.send("mods:download-finished", { modId: id, fileId: result.fileId, fileName: result.fileName });
     return { ok: true, fileId: result.fileId, fileName: result.fileName };
   } catch (e) {
-    const message = toUserFacingModsError(e);
-    event.sender.send("mods:download-error", { modId: id, error: message });
-    return { ok: false, error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    event.sender.send("mods:download-error", { modId: id, errorKey, errorArgs });
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
   }
 });
 
@@ -2273,9 +2931,9 @@ ipcMain.handle("mods:install-file", async (event, modId: number, fileId: number,
   const id = Number(modId);
   const fid = Number(fileId);
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!Number.isFinite(id) || id <= 0) return { ok: false, error: "Invalid mod id" };
-  if (!Number.isFinite(fid) || fid <= 0) return { ok: false, error: "Invalid file id" };
-  if (!dir) return { ok: false, error: "Invalid gameDir" };
+  if (!Number.isFinite(id) || id <= 0) return { ...modsFail("modsModal.errors.invalidModId"), error: null as string | null };
+  if (!Number.isFinite(fid) || fid <= 0) return { ...modsFail("modsModal.errors.invalidFileId"), error: null as string | null };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
 
   try {
     const prev = (await readModsRegistry(dir)).find((x) => x.modId === id) ?? null;
@@ -2297,15 +2955,374 @@ ipcMain.handle("mods:install-file", async (event, modId: number, fileId: number,
     event.sender.send("mods:download-finished", { modId: id, fileId: result.fileId, fileName: result.fileName });
     return { ok: true, fileId: result.fileId, fileName: result.fileName };
   } catch (e) {
-    const message = toUserFacingModsError(e);
-    event.sender.send("mods:download-error", { modId: id, error: message });
-    return { ok: false, error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    event.sender.send("mods:download-error", { modId: id, errorKey, errorArgs });
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
+  }
+});
+
+ipcMain.handle("mods:attach-manual", async (_event, gameDir: string, fileName: string, curseforgeUrl: string) => {
+  const dir = typeof gameDir === "string" ? gameDir.trim() : "";
+  if (!dir) {
+    return {
+      ...modsFail("modsModal.errors.invalidGameDir"),
+      errorCode: "BAD_ARGS" as const,
+      error: null as string | null,
+    };
+  }
+
+  try {
+    const link = typeof curseforgeUrl === "string" ? curseforgeUrl.trim() : "";
+    if (!/^https:\/\/www\.curseforge\.com\/hytale\/mods\/[a-z0-9][a-z0-9-]*\/?$/i.test(link)) {
+      return {
+        ...modsFail("modsModal.errors.invalidAttachLink", {
+          example: "https://www.curseforge.com/hytale/mods/example",
+        }),
+        errorCode: "ATTACH_INVALID_LINK" as const,
+        error: null as string | null,
+      };
+    }
+
+    const safe = assertSafeFileName(fileName);
+    const baseFileName = stripDisabledSuffix(safe);
+    const modsDir = getModsDir(dir);
+    const enabledPath = path.join(modsDir, baseFileName);
+    const disabledPath = path.join(modsDir, `${baseFileName}.disabled`);
+    if (!(await fileExists(enabledPath)) && !(await fileExists(disabledPath))) {
+      return {
+        ...modsFail("modsModal.errors.attachFileNotFound"),
+        errorCode: "ATTACH_FILE_NOT_FOUND" as const,
+        error: null as string | null,
+      };
+    }
+
+    const modId = await resolveCurseForgeModIdFromUrl(link);
+
+    // If the manual file name matches the latest stable CF file name, we can safely infer the fileId.
+    let inferredFileId: number | undefined;
+    try {
+      const latest = await pickLatestStableFileInfo(modId);
+      const latestFileName = (latest.fileName || "").trim();
+      if (latest.fileId != null && latestFileName) {
+        if (latestFileName.toLowerCase() === baseFileName.toLowerCase()) {
+          inferredFileId = latest.fileId;
+        }
+      }
+    } catch {
+      // ignore inference failure; attach should still succeed
+    }
+
+    await upsertRegistryEntry(dir, {
+      modId,
+      fileId: inferredFileId,
+      fileName: baseFileName,
+      installedAt: new Date().toISOString(),
+    });
+
+    return { ok: true, modId, fileName: baseFileName };
+  } catch (e) {
+    const raw = e instanceof Error ? e.message : "";
+    const lower = String(raw || "").toLowerCase();
+
+    if (lower.includes("couldn't resolve mod from curseforge link")) {
+      return {
+        ...modsFail("modsModal.errors.modNotFoundFromLink", {
+          example: "https://www.curseforge.com/hytale/mods/example",
+        }),
+        errorCode: "ATTACH_MOD_NOT_FOUND" as const,
+        error: null as string | null,
+      };
+    }
+
+    if (lower.includes("invalid curseforge link")) {
+      return {
+        ...modsFail("modsModal.errors.invalidAttachLink", {
+          example: "https://www.curseforge.com/hytale/mods/example",
+        }),
+        errorCode: "ATTACH_INVALID_LINK" as const,
+        error: null as string | null,
+      };
+    }
+
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    const errorCode =
+      errorKey === "modsModal.errors.serviceUnreachable"
+        ? "MODS_SERVICE_UNREACHABLE"
+        : "UNKNOWN";
+    return {
+      ...modsFail(errorKey, errorArgs, errorCode),
+      errorCode,
+      error: null as string | null,
+    };
+  }
+});
+
+ipcMain.handle("mods:check-update-one", async (_event, gameDir: string, modId: number) => {
+  const dir = typeof gameDir === "string" ? gameDir.trim() : "";
+  const id = Number(modId);
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
+  if (!Number.isFinite(id) || id <= 0) return { ...modsFail("modsModal.errors.invalidModId"), error: null as string | null };
+
+  try {
+    const registry = await readModsRegistry(dir);
+    const prev = registry.find((x) => x.modId === id) ?? null;
+    if (!prev) return { ...modsFail("modsModal.errors.modNotManaged"), error: null as string | null };
+
+    const latest = await pickLatestStableFileInfo(id);
+    const installedFileId = typeof prev.fileId === "number" ? prev.fileId : undefined;
+    const prevFileName = typeof prev.fileName === "string" ? prev.fileName.trim() : "";
+
+    // If we don't have a fileId yet (common after manual attach), but the on-disk file name matches
+    // the latest stable CF file name, treat it as up-to-date and backfill the fileId.
+    if (
+      installedFileId == null &&
+      latest.fileId != null &&
+      latest.fileName &&
+      prevFileName &&
+      latest.fileName.toLowerCase() === prevFileName.toLowerCase()
+    ) {
+      await upsertRegistryEntry(dir, {
+        modId: id,
+        fileId: latest.fileId,
+        fileName: prevFileName,
+        installedAt: prev.installedAt,
+      });
+    }
+
+    const effectiveInstalledFileId =
+      typeof prev.fileId === "number"
+        ? prev.fileId
+        : installedFileId == null &&
+            latest.fileId != null &&
+            latest.fileName &&
+            prevFileName &&
+            latest.fileName.toLowerCase() === prevFileName.toLowerCase()
+          ? latest.fileId
+          : undefined;
+
+    const updateAvailable =
+      latest.fileId != null &&
+      (effectiveInstalledFileId == null || effectiveInstalledFileId !== latest.fileId);
+
+    return {
+      ok: true,
+      modId: id,
+      updateAvailable,
+      latestFileId: latest.fileId,
+      latestName: latest.name,
+    };
+  } catch (e) {
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
+  }
+});
+
+ipcMain.handle("mods:check-updates-all", async (_event, gameDir: string) => {
+  const dir = typeof gameDir === "string" ? gameDir.trim() : "";
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
+
+  try {
+    const registry = await readModsRegistry(dir);
+    const results: Array<{ modId: number; updateAvailable: boolean; latestFileId: number | null; latestName: string }> = [];
+
+    let mutated = false;
+
+    for (const entry of registry) {
+      const id = Number(entry.modId);
+      if (!Number.isFinite(id) || id <= 0) continue;
+
+      const latest = await pickLatestStableFileInfo(id);
+      const installedFileId = typeof entry.fileId === "number" ? entry.fileId : undefined;
+      const prevFileName = typeof entry.fileName === "string" ? entry.fileName.trim() : "";
+
+      // Backfill fileId for attached manual mods when file names match latest stable.
+      if (
+        installedFileId == null &&
+        latest.fileId != null &&
+        latest.fileName &&
+        prevFileName &&
+        latest.fileName.toLowerCase() === prevFileName.toLowerCase()
+      ) {
+        entry.fileId = latest.fileId;
+        mutated = true;
+      }
+
+      const effectiveInstalledFileId = typeof entry.fileId === "number" ? entry.fileId : undefined;
+      const updateAvailable =
+        latest.fileId != null &&
+        (effectiveInstalledFileId == null || effectiveInstalledFileId !== latest.fileId);
+
+      results.push({
+        modId: id,
+        updateAvailable,
+        latestFileId: latest.fileId,
+        latestName: latest.name,
+      });
+    }
+
+    if (mutated) {
+      await writeModsRegistry(dir, registry);
+    }
+
+    return { ok: true, results };
+  } catch (e) {
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
+  }
+});
+
+ipcMain.handle("mods:update-one", async (event, gameDir: string, modId: number) => {
+  const dir = typeof gameDir === "string" ? gameDir.trim() : "";
+  const id = Number(modId);
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
+  if (!Number.isFinite(id) || id <= 0) return { ...modsFail("modsModal.errors.invalidModId"), error: null as string | null };
+
+  try {
+    const registry = await readModsRegistry(dir);
+    const prev = registry.find((x) => x.modId === id) ?? null;
+    if (!prev) return { ...modsFail("modsModal.errors.modNotManaged"), error: null as string | null };
+
+    const latest = await pickLatestStableFileInfo(id);
+    const latestStableId = latest.fileId;
+    if (latestStableId == null) {
+      return { ok: true, modId: id, updated: false };
+    }
+    const installedFileId = typeof prev.fileId === "number" ? prev.fileId : undefined;
+    const prevFileName = typeof prev.fileName === "string" ? prev.fileName.trim() : "";
+
+    // If fileId is missing but file name already matches latest stable, just backfill and skip download.
+    if (
+      installedFileId == null &&
+      latest.fileName &&
+      prevFileName &&
+      latest.fileName.toLowerCase() === prevFileName.toLowerCase()
+    ) {
+      await upsertRegistryEntry(dir, {
+        modId: id,
+        fileId: latestStableId,
+        fileName: prevFileName,
+        installedAt: prev.installedAt,
+      });
+      return { ok: true, modId: id, updated: false };
+    }
+
+    const needsUpdate = installedFileId == null || installedFileId !== latestStableId;
+    if (!needsUpdate) return { ok: true, modId: id, updated: false };
+
+    const preserveDisabled = prevFileName ? await isInstalledModDisabled(dir, prevFileName) : false;
+
+    const targetDir = getModsDir(dir);
+    const result = await downloadModFile(id, latestStableId, targetDir, (received, total) => {
+      event.sender.send("mods:download-progress", { modId: id, received, total });
+    });
+
+    // If the file name changed, remove the previously installed file.
+    if (prevFileName && prevFileName !== result.fileName) {
+      await deleteModFileBestEffort(dir, prevFileName);
+    }
+
+    if (preserveDisabled) {
+      await ensureDisabledStateForDownloadedFile(dir, result.fileName, true);
+    }
+
+    await upsertRegistryEntry(dir, {
+      modId: id,
+      fileId: result.fileId,
+      fileName: result.fileName,
+      installedAt: new Date().toISOString(),
+    });
+
+    event.sender.send("mods:download-finished", { modId: id, fileId: result.fileId, fileName: result.fileName });
+    return { ok: true, modId: id, updated: true, fileId: result.fileId, fileName: result.fileName };
+  } catch (e) {
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    event.sender.send("mods:download-error", { modId: id, errorKey, errorArgs });
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
+  }
+});
+
+ipcMain.handle("mods:update-all", async (event, gameDir: string) => {
+  const dir = typeof gameDir === "string" ? gameDir.trim() : "";
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
+
+  try {
+    // Only update mods that are currently installed on disk.
+    const modsDir = getModsDir(dir);
+    await fs.promises.mkdir(modsDir, { recursive: true });
+    const installedFiles = await fs.promises.readdir(modsDir);
+    const installedSet = new Set(installedFiles.filter((f) => typeof f === "string" && f.trim()));
+
+    const registry = await readModsRegistry(dir);
+    let updated = 0;
+    let skipped = 0;
+    const errors: Array<{ modId: number; errorKey: string; errorArgs?: Record<string, any> }> = [];
+
+    for (const entry of registry) {
+      const id = Number(entry.modId);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      const fileName = typeof entry.fileName === "string" ? entry.fileName : "";
+      if (fileName) {
+        const inDisk = installedSet.has(fileName) || installedSet.has(`${fileName}.disabled`);
+        if (!inDisk) {
+          skipped++;
+          continue;
+        }
+      }
+
+      try {
+        const latestStableId = await pickLatestStableFileId(id);
+        if (latestStableId == null) {
+          skipped++;
+          continue;
+        }
+        const installedFileId = typeof entry.fileId === "number" ? entry.fileId : undefined;
+        const needsUpdate = installedFileId == null || installedFileId !== latestStableId;
+        if (!needsUpdate) {
+          skipped++;
+          continue;
+        }
+
+        const prevFileName = fileName;
+        const preserveDisabled = prevFileName ? await isInstalledModDisabled(dir, prevFileName) : false;
+
+        const result = await downloadModFile(id, latestStableId, modsDir, (received, total) => {
+          event.sender.send("mods:download-progress", { modId: id, received, total });
+        });
+
+        if (prevFileName && prevFileName !== result.fileName) {
+          await deleteModFileBestEffort(dir, prevFileName);
+        }
+
+        if (preserveDisabled) {
+          await ensureDisabledStateForDownloadedFile(dir, result.fileName, true);
+        }
+
+        await upsertRegistryEntry(dir, {
+          modId: id,
+          fileId: result.fileId,
+          fileName: result.fileName,
+          installedAt: new Date().toISOString(),
+        });
+
+        event.sender.send("mods:download-finished", { modId: id, fileId: result.fileId, fileName: result.fileName });
+        updated++;
+      } catch (e) {
+        const { errorKey, errorArgs } = toModsErrorKey(e);
+        errors.push({ modId: id, errorKey, errorArgs });
+        event.sender.send("mods:download-error", { modId: id, errorKey, errorArgs });
+      }
+    }
+
+    return { ok: true, updated, skipped, errors };
+  } catch (e) {
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:installed:list", async (_, gameDir: string) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, modsDir: "", items: [], error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), modsDir: "", items: [], error: null as string | null };
 
   try {
     const modsDir = getModsDir(dir);
@@ -2321,14 +3338,14 @@ ipcMain.handle("mods:installed:list", async (_, gameDir: string) => {
 
     return { ok: true, modsDir, items, error: null as string | null };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, modsDir: "", items: [], error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), modsDir: "", items: [], error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:installed:toggle", async (_, gameDir: string, fileName: string) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
 
   try {
     const safeName = assertSafeFileName(fileName);
@@ -2341,14 +3358,14 @@ ipcMain.handle("mods:installed:toggle", async (_, gameDir: string, fileName: str
     await fs.promises.rename(from, to);
     return { ok: true };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:installed:delete", async (_, gameDir: string, fileName: string) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
 
   try {
     const safeName = assertSafeFileName(fileName);
@@ -2367,14 +3384,14 @@ ipcMain.handle("mods:installed:delete", async (_, gameDir: string, fileName: str
 
     return { ok: true };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:file-hash", async (_, gameDir: string, fileName: string) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, sha256: "", error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), sha256: "", error: null as string | null };
 
   try {
     const safeName = assertSafeFileName(fileName);
@@ -2391,14 +3408,14 @@ ipcMain.handle("mods:file-hash", async (_, gameDir: string, fileName: string) =>
 
     return { ok: true, sha256: hash.digest("hex"), error: null as string | null };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, sha256: "", error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), sha256: "", error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:installed:set-all", async (_, gameDir: string, enabled: boolean) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
 
   try {
     const modsDir = getModsDir(dir);
@@ -2428,31 +3445,31 @@ ipcMain.handle("mods:installed:set-all", async (_, gameDir: string, enabled: boo
 
     return { ok: true, changed };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:profiles:list", async (_, gameDir: string) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, profiles: [], error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), profiles: [], error: null as string | null };
   try {
     const profiles = await readProfiles(dir);
     return { ok: true, profiles };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, profiles: [], error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), profiles: [], error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:profiles:save", async (_, gameDir: string, profile: { name: string; mods: string[] }) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
   try {
     const name = assertSafeProfileName(profile?.name);
     if (name.toLowerCase() === VANILLA_PROFILE_NAME.toLowerCase()) {
       // Yes, we hard-block naming a profile "Vanilla". No, it's not negotiable.
-      return { ok: false, error: "Reserved profile name" };
+      return { ...modsFail("modsModal.errors.reservedProfileName"), error: null as string | null };
     }
     const mods = Array.isArray(profile?.mods) ? profile.mods.map(normalizeModBaseName) : [];
     const uniqueMods = Array.from(new Set(mods)).filter(Boolean);
@@ -2464,39 +3481,39 @@ ipcMain.handle("mods:profiles:save", async (_, gameDir: string, profile: { name:
     await writeProfiles(dir, canonicalizeProfiles(next));
     return { ok: true };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:profiles:delete", async (_, gameDir: string, name: string) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
   try {
     const safeName = assertSafeProfileName(name);
     if (safeName.toLowerCase() === VANILLA_PROFILE_NAME.toLowerCase()) {
       // If you could delete Vanilla, you absolutely would. So you can't.
-      return { ok: false, error: "Cannot delete Vanilla" };
+      return { ...modsFail("modsModal.errors.cannotDeleteVanilla"), error: null as string | null };
     }
     const existing = await readProfiles(dir);
     const next = existing.filter((p) => p.name.toLowerCase() !== safeName.toLowerCase());
     await writeProfiles(dir, canonicalizeProfiles(next));
     return { ok: true };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
   }
 });
 
 ipcMain.handle("mods:profiles:apply", async (_, gameDir: string, name: string) => {
   const dir = typeof gameDir === "string" ? gameDir.trim() : "";
-  if (!dir) return { ok: false, error: "Invalid gameDir" };
+  if (!dir) return { ...modsFail("modsModal.errors.invalidGameDir"), error: null as string | null };
 
   try {
     const safeName = assertSafeProfileName(name);
     const profiles = await readProfiles(dir);
     const profile = profiles.find((p) => p.name.toLowerCase() === safeName.toLowerCase());
-    if (!profile) return { ok: false, error: "Profile not found" };
+    if (!profile) return { ...modsFail("modsModal.errors.profileNotFound"), error: null as string | null };
 
     const modsDir = getModsDir(dir);
     await fs.promises.mkdir(modsDir, { recursive: true });
@@ -2550,8 +3567,8 @@ ipcMain.handle("mods:profiles:apply", async (_, gameDir: string, name: string) =
 
     return { ok: true, enabledCount, disabledCount };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return { ok: false, error: message };
+    const { errorKey, errorArgs } = toModsErrorKey(e);
+    return { ...modsFail(errorKey, errorArgs), error: null as string | null };
   }
 });
 
@@ -2562,6 +3579,75 @@ ipcMain.handle("get-default-game-directory", () => {
 ipcMain.handle("download-directory:get", () => {
   return getEffectiveDownloadDirectory();
 });
+
+ipcMain.handle(
+  "launcher-cache:clear-install-stagings",
+  async (_event, gameDir?: string | null) => {
+    const baseDir =
+      typeof gameDir === "string" && gameDir.trim()
+        ? gameDir.trim()
+        : getEffectiveDownloadDirectory();
+
+    const isStagingDirName = (name: string) => /\.staging-\d+$/.test(name);
+
+    const listStagingsInDir = async (dir: string): Promise<string[]> => {
+      try {
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        return entries
+          .filter((e) => e.isDirectory() && isStagingDirName(e.name))
+          .map((e) => path.join(dir, e.name));
+      } catch {
+        return [];
+      }
+    };
+
+    const deleted: string[] = [];
+    const failed: Array<{ path: string; error: string }> = [];
+
+    try {
+      const gameRoot = getGameRootDir(baseDir);
+      const releaseDir = getReleaseChannelDir(baseDir);
+      const preReleaseDir = getPreReleaseChannelDir(baseDir);
+
+      const candidates = new Set<string>();
+      for (const p of await listStagingsInDir(gameRoot)) candidates.add(p);
+      for (const p of await listStagingsInDir(releaseDir)) candidates.add(p);
+      for (const p of await listStagingsInDir(preReleaseDir)) candidates.add(p);
+
+      for (const p of candidates) {
+        try {
+          await fs.promises.rm(p, {
+            recursive: true,
+            force: true,
+            maxRetries: 2,
+            retryDelay: 50,
+          });
+          deleted.push(p);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          failed.push({ path: p, error: msg });
+        }
+      }
+
+      return {
+        ok: failed.length === 0,
+        baseDir,
+        deleted: deleted.length,
+        failed: failed.length,
+        errors: failed.slice(0, 10),
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return {
+        ok: false,
+        baseDir,
+        deleted: deleted.length,
+        failed: failed.length,
+        error: msg,
+      };
+    }
+  },
+);
 
 ipcMain.handle("steamdeck-mode:get", () => {
   return getSteamDeckModeEnabled();
@@ -2958,6 +4044,7 @@ ipcMain.handle(
       noAot?: boolean;
       ramMinGb?: number | null;
       ramMaxGb?: number | null;
+      customJvmArgs?: string | null;
     },
   ): Promise<HostServerStartResult> => {
     const win = BrowserWindow.fromWebContents(e.sender);
@@ -3055,6 +4142,65 @@ ipcMain.handle(
     if (!opts?.noAot) {
       args.push("-XX:AOTCache=HytaleServer.aot");
     }
+
+    const splitArgs = (raw: string): string[] => {
+      const out: string[] = [];
+      let cur = "";
+      let quote: '"' | "'" | null = null;
+      let escaped = false;
+      for (const ch of raw) {
+        if (escaped) {
+          cur += ch;
+          escaped = false;
+          continue;
+        }
+        if (ch === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (quote) {
+          if (ch === quote) {
+            quote = null;
+            continue;
+          }
+          cur += ch;
+          continue;
+        }
+        if (ch === '"' || ch === "'") {
+          quote = ch as any;
+          continue;
+        }
+        if (/\s/.test(ch)) {
+          if (cur) out.push(cur);
+          cur = "";
+          continue;
+        }
+        cur += ch;
+      }
+      if (cur) out.push(cur);
+      return out;
+    };
+
+    const customJvmRaw = typeof opts?.customJvmArgs === "string" ? opts.customJvmArgs.trim() : "";
+    if (customJvmRaw) {
+      const extra = splitArgs(customJvmRaw).filter((s) => !!String(s ?? "").trim());
+      // Protect the core command structure. Users can pass JVM flags, but not -jar.
+      if (extra.includes("-jar")) {
+        return {
+          ok: false,
+          error: { code: "BAD_CUSTOM_ARGS", message: "Custom JVM args cannot include -jar" },
+        };
+      }
+      // Avoid pathological inputs.
+      if (extra.length > 80) {
+        return {
+          ok: false,
+          error: { code: "BAD_CUSTOM_ARGS", message: "Too many custom JVM args" },
+        };
+      }
+      args.push(...extra);
+    }
+
     args.push("-jar", "HytaleServer.jar", "--assets", assetsArg);
 
     const authMode = opts?.authMode;
@@ -3290,11 +4436,9 @@ ipcMain.on(
     // It's safer to be boring than to accidentally enable Premium codepaths.
     const isPremium = normalized === "premium";
     const isNoPremium = !isPremium;
-    const forceFullInstall =
-      isNoPremium && !!version?.isLatest;
-    void ((forceFullInstall || !isNoPremium)
-      ? (isNoPremium ? installGameNoPremiumFull(gameDir, version, win) : installGame(gameDir, version, win))
-      : installGameNoPremium(gameDir, version, win)
+    void (isNoPremium
+      ? installGameNoPremium(gameDir, version, win)
+      : installGame(gameDir, version, win)
     ).then((ok) => {
       if (!ok) return;
       if (process.platform !== "linux") return;
@@ -3329,13 +4473,9 @@ ipcMain.on(
       const normalized = String(accountType ?? "").trim().toLowerCase();
       const isPremium = normalized === "premium";
       const isNoPremium = !isPremium;
-      const forceFullInstall =
-        isNoPremium && !!version?.isLatest;
-      void (forceFullInstall
-        ? installGameNoPremiumFull(gameDir, version, win)
-        : isNoPremium
-          ? installGameNoPremium(gameDir, version, win)
-          : installGameSmart(gameDir, version, fromBuildIndex, win)
+      void (isNoPremium
+        ? installGameNoPremium(gameDir, version, win)
+        : installGameSmart(gameDir, version, fromBuildIndex, win)
       ).then((ok) => {
         if (!ok) return;
         if (process.platform !== "linux") return;
@@ -3456,12 +4596,16 @@ ipcMain.on(
             // ignore
           }
 
-          // Give the user a few seconds to see the launcher state change,
-          // then move to tray/background while the game is running.
-          backgroundTimeout = setTimeout(() => {
-            moveToBackground();
-            backgroundTimeout = null;
-          }, 3000);
+          // If the local host server is running, keep the launcher visible so the user
+          // can manage the server while the game is running.
+          if (!isHostServerRunning()) {
+            // Give the user a few seconds to see the launcher state change,
+            // then move to tray/background while the game is running.
+            backgroundTimeout = setTimeout(() => {
+              moveToBackground();
+              backgroundTimeout = null;
+            }, 3000);
+          }
         },
         onGameExited: () => {
           isGameRunning = false;

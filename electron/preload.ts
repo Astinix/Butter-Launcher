@@ -104,6 +104,11 @@ contextBridge.exposeInMainWorld("config", {
     ipcRenderer.invoke("get-default-game-directory"),
   getDownloadDirectory: () => ipcRenderer.invoke("download-directory:get"),
   selectDownloadDirectory: () => ipcRenderer.invoke("download-directory:select"),
+  clearInstallCache: (gameDir?: string | null) =>
+    ipcRenderer.invoke(
+      "launcher-cache:clear-install-stagings",
+      typeof gameDir === "string" ? gameDir : null,
+    ),
   pickFolder: (payload?: { title?: string; defaultPath?: string }) =>
     ipcRenderer.invoke("dialog:pick-folder", payload ?? {}),
   pickFile: (payload?: { title?: string; defaultPath?: string; extensions?: string[] }) =>
@@ -130,6 +135,22 @@ contextBridge.exposeInMainWorld("config", {
   premiumOauthCancel: () => ipcRenderer.invoke("premium:oauth:cancel"),
   premiumLogout: () => ipcRenderer.invoke("premium:logout"),
 
+  // Matcha avatar (crop + upload from cached preview)
+  matchaAvatarSync: (payload: {
+    gameDir: string;
+    username: string;
+    token: string;
+    accountType?: string | null;
+    uuid?: string | null;
+    customUUID?: string | null;
+    bgColor?: string | null;
+    lastHash?: string | null;
+    force?: boolean;
+  }) => ipcRenderer.invoke("matcha:avatar:sync", payload),
+
+  matchaAvatarUploadCustom: (payload: { token: string; filePath: string }) =>
+    ipcRenderer.invoke("matcha:avatar:uploadCustom", payload),
+
   // Host server (local)
   hostServerStart: (
     gameDir: string,
@@ -140,6 +161,7 @@ contextBridge.exposeInMainWorld("config", {
       noAot?: boolean;
       ramMinGb?: number | null;
       ramMaxGb?: number | null;
+      customJvmArgs?: string | null;
     },
   ) => ipcRenderer.invoke("host-server:start", gameDir, version, opts ?? {}),
   hostServerStop: () => ipcRenderer.invoke("host-server:stop"),
@@ -161,6 +183,16 @@ contextBridge.exposeInMainWorld("config", {
   modsInstall: (modId: number, gameDir: string) => ipcRenderer.invoke("mods:install", modId, gameDir),
   modsInstallFile: (modId: number, fileId: number, gameDir: string) =>
     ipcRenderer.invoke("mods:install-file", modId, fileId, gameDir),
+  modsAttachManual: (gameDir: string, fileName: string, curseforgeUrl: string) =>
+    ipcRenderer.invoke("mods:attach-manual", gameDir, fileName, curseforgeUrl),
+  modsCheckUpdateOne: (gameDir: string, modId: number) =>
+    ipcRenderer.invoke("mods:check-update-one", gameDir, modId),
+  modsCheckUpdatesAll: (gameDir: string) =>
+    ipcRenderer.invoke("mods:check-updates-all", gameDir),
+  modsUpdateOne: (gameDir: string, modId: number) =>
+    ipcRenderer.invoke("mods:update-one", gameDir, modId),
+  modsUpdateAll: (gameDir: string) =>
+    ipcRenderer.invoke("mods:update-all", gameDir),
   modsRegistry: (gameDir: string) => ipcRenderer.invoke("mods:registry", gameDir),
   modsInstalledList: (gameDir: string) => ipcRenderer.invoke("mods:installed:list", gameDir),
   modsInstalledToggle: (gameDir: string, fileName: string) =>

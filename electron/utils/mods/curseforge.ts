@@ -428,6 +428,7 @@ export const downloadLatestModFile = async (
   await fs.promises.mkdir(targetDir, { recursive: true });
 
   const destPath = path.join(targetDir, file.fileName);
+  const tmpPath = `${destPath}.partial-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   const res = await fetch(file.downloadUrl, {
     headers: {
@@ -449,8 +450,20 @@ export const downloadLatestModFile = async (
     onProgress?.(received, total);
   });
 
-  const out = fs.createWriteStream(destPath);
+  const out = fs.createWriteStream(tmpPath);
   await pipeline(nodeStream, out);
+
+  // Atomic-ish replace (Windows rename won't overwrite)
+  try {
+    await fs.promises.rename(tmpPath, destPath);
+  } catch {
+    try {
+      await fs.promises.unlink(destPath);
+    } catch {
+      // ignore
+    }
+    await fs.promises.rename(tmpPath, destPath);
+  }
 
   return { fileId: file.id, fileName: file.fileName, filePath: destPath };
 };
@@ -466,6 +479,7 @@ export const downloadModFile = async (
   await fs.promises.mkdir(targetDir, { recursive: true });
 
   const destPath = path.join(targetDir, file.fileName);
+  const tmpPath = `${destPath}.partial-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   const res = await fetch(file.downloadUrl, {
     headers: {
@@ -487,8 +501,20 @@ export const downloadModFile = async (
     onProgress?.(received, total);
   });
 
-  const out = fs.createWriteStream(destPath);
+  const out = fs.createWriteStream(tmpPath);
   await pipeline(nodeStream, out);
+
+  // Atomic-ish replace (Windows rename won't overwrite)
+  try {
+    await fs.promises.rename(tmpPath, destPath);
+  } catch {
+    try {
+      await fs.promises.unlink(destPath);
+    } catch {
+      // ignore
+    }
+    await fs.promises.rename(tmpPath, destPath);
+  }
 
   return { fileId: file.id, fileName: file.fileName, filePath: destPath };
 };
