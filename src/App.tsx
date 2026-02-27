@@ -229,6 +229,86 @@ export default function App() {
   })();
 
   useEffect(() => {
+    if (!username) return;
+    if (!hasValidAccountType) return;
+    if (!window.config?.offlineTokenRefresh) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const accountType = (localStorage.getItem("accountType") || "").trim();
+        if (accountType !== "premium" && accountType !== "nopremium") return;
+        const customUUID = (localStorage.getItem("customUUID") || "").trim();
+        const res = await window.config.offlineTokenRefresh({
+          username,
+          accountType,
+          customUUID: customUUID || null,
+        });
+        if (cancelled) return;
+        if (!res || (res as any).ok !== true) return;
+      } catch {
+        // Best-effort: do not block UI if the internet is down.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [username, hasValidAccountType]);
+
+  useEffect(() => {
+    // Best-effort: keep Butter JWKS cached whenever we have internet.
+    // This allows offline-token validation to work after the user deletes AppData.
+    if (!hasValidAccountType) return;
+    if (!window.config?.butterJwksRefresh) return;
+
+    try {
+      const accountType = (localStorage.getItem("accountType") || "").trim();
+      if (accountType !== "nopremium") return;
+    } catch {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await window.config.butterJwksRefresh();
+        if (cancelled) return;
+        if (!res || (res as any).ok !== true) return;
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasValidAccountType]);
+
+  useEffect(() => {
+    if (!hasValidAccountType) return;
+    if (!window.config?.officialJwksRefresh) return;
+
+    // Best-effort: cache official JWKS in case the user switches to Premium.
+    let cancelled = false;
+    void (async () => {
+      try {
+        const accountType = (localStorage.getItem("accountType") || "").trim();
+        if (accountType !== "premium" && accountType !== "nopremium") return;
+        const res = await window.config.officialJwksRefresh();
+        if (cancelled) return;
+        if (!res || (res as any).ok !== true) return;
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasValidAccountType]);
+
+  useEffect(() => {
     if (!window.ipcRenderer) return;
     const onForceLogout = () => {
       try {

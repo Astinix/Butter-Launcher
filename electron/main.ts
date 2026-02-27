@@ -9,6 +9,7 @@ import {
   clipboard,
   dialog,
   session,
+  net,
 } from "electron";
 
 // Main process: where we spawn processes and regrets.
@@ -25,9 +26,12 @@ import { LOGS_DIRECTORY, META_DIRECTORY } from "./utils/const";
 import { logger } from "./utils/logger";
 import { ErrorCodes, mapErrorToCode } from "./utils/errorCodes";
 import { genUUID } from "./utils/game/uuid";
+import { ensureButterJwks, ensureOfficialJwks, ensureOfflineToken, fetchPremiumLauncherPrimaryProfile } from "./utils/game/auth";
 
 import {
   cancelBuildDownload,
+  cancelAllBuildDownloads,
+  hasBuildDownloadsInFlight,
   installGame,
   installGameNoPremium,
   installGameSmart,
@@ -68,8 +72,9 @@ import {
   getReleaseBuildDir,
   getReleaseChannelDir,
   migrateLegacyChannelInstallIfNeeded,
+  resolveServerPath,
+  resolveExistingInstallDir,
 } from "./utils/game/paths";
-import { resolveExistingInstallDir } from "./utils/game/paths";
 import {
   checkOnlinePatchNeeded,
   disableOnlinePatch,
@@ -999,6 +1004,7 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let trayUnavailable = false;
 let isQuitting = false;
+let closeDownloadConfirmPending = false;
 let backgroundTimeout: NodeJS.Timeout | null = null;
 let isBackgroundMode = false;
 let networkBlockerInstalled = false;
@@ -1412,6 +1418,20 @@ function createWindow() {
       return;
     }
 
+    // If a build download is in flight, ask the renderer to confirm.
+    // This handles both the custom DragBar X and the OS window X.
+    if (hasBuildDownloadsInFlight()) {
+      e.preventDefault();
+      if (closeDownloadConfirmPending) return;
+      closeDownloadConfirmPending = true;
+      try {
+        win.webContents.send("app:confirm-close-download");
+      } catch {
+        closeDownloadConfirmPending = false;
+      }
+      return;
+    }
+
     // Ensure macOS quits as well (default behavior is to keep the app running).
     if (process.platform === "darwin") {
       isQuitting = true;
@@ -1463,6 +1483,26 @@ ipcMain.on("toggle-maximize-window", () => {
 });
 ipcMain.on("close-window", () => {
   win?.close();
+});
+
+ipcMain.on("app:request-close", () => {
+  win?.close();
+});
+
+ipcMain.on("app:close-download:cancel", () => {
+  closeDownloadConfirmPending = false;
+});
+
+ipcMain.on("app:cancel-downloads-and-quit", () => {
+  try {
+    cancelAllBuildDownloads();
+  } catch (err) {
+    logger.warn("Failed to cancel downloads during quit", err);
+  }
+
+  closeDownloadConfirmPending = false;
+  isQuitting = true;
+  app.quit();
 });
 
 ipcMain.on("ready", (_, { enableRPC }) => {
@@ -1565,13 +1605,157 @@ ipcMain.handle("launcher-settings:startup-sound:first-run-played", async () => {
 });
 
 ipcMain.handle("fetch:json", async (_, url, ...args) => {
-  const response = await fetch(url, ...args);
-  return await response.json();
+  try {
+    const response = await fetch(url, ...args);
+    return await response.json();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    logger.warn("fetch:json via fetch() failed; falling back to electron.net", {
+      url,
+      error: message,
+    });
+
+    const init = (args?.[0] ?? null) as any;
+    const headers = coercePlainHeaders(init?.headers);
+    const res = await netRequestRaw(String(url), { method: "GET", headers });
+    const text = res.body.toString("utf8");
+    return JSON.parse(text);
+  }
 });
 ipcMain.handle("fetch:head", async (_, url, ...args) => {
-  const response = await fetch(url, ...args);
-  return response.status;
+  try {
+    const response = await fetch(url, ...args);
+    return response.status;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    logger.warn("fetch:head via fetch() failed; falling back to electron.net", {
+      url,
+      error: message,
+    });
+
+    const init = (args?.[0] ?? null) as any;
+    const headers = coercePlainHeaders(init?.headers);
+
+    try {
+      const res = await netRequestRaw(String(url), { method: "HEAD", headers });
+      return res.status;
+    } catch {
+      // Some proxies/servers behave oddly with HEAD; GET as a best-effort status probe.
+      try {
+        const res = await netRequestRaw(String(url), { method: "GET", headers });
+        return res.status;
+      } catch (e2) {
+        const message2 = e2 instanceof Error ? e2.message : String(e2);
+        logger.warn("fetch:head fallback via electron.net also failed", {
+          url,
+          error: message2,
+        });
+        return 0;
+      }
+    }
+  }
 });
+
+const coercePlainHeaders = (
+  headers: any,
+): Record<string, string> | undefined => {
+  if (!headers) return undefined;
+
+  // Headers instance (browser-like)
+  try {
+    if (typeof headers?.forEach === "function") {
+      const out: Record<string, string> = {};
+      headers.forEach((value: any, key: any) => {
+        out[String(key)] = String(value);
+      });
+      return Object.keys(out).length ? out : undefined;
+    }
+  } catch {
+    // ignore
+  }
+
+  // Array of tuples
+  if (Array.isArray(headers)) {
+    const out: Record<string, string> = {};
+    for (const pair of headers) {
+      if (!Array.isArray(pair) || pair.length < 2) continue;
+      const [k, v] = pair;
+      out[String(k)] = String(v);
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+
+  // Plain object
+  if (typeof headers === "object") {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers)) {
+      if (typeof v === "undefined") continue;
+      if (Array.isArray(v)) out[String(k)] = v.map(String).join(", ");
+      else out[String(k)] = String(v);
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+
+  return undefined;
+};
+
+const netRequestRaw = (
+  url: string,
+  opts: { method: string; headers?: Record<string, string> },
+  maxRedirects = 5,
+): Promise<{ status: number; headers: Record<string, string | string[]>; body: Buffer }> => {
+  return new Promise((resolve, reject) => {
+    const request = net.request({ url, method: opts.method, headers: opts.headers });
+
+    request.on("response", (response) => {
+      const status = (response as any).statusCode as number;
+      const responseHeaders = ((response as any).headers ?? {}) as Record<
+        string,
+        string | string[]
+      >;
+
+      const locationRaw = responseHeaders?.location;
+      const location = Array.isArray(locationRaw)
+        ? locationRaw[0]
+        : locationRaw;
+
+      const isRedirect =
+        status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+
+      if (isRedirect && location && maxRedirects > 0) {
+        // Drain before redirect to avoid hanging sockets.
+        response.on("data", () => {});
+        response.on("end", () => {
+          try {
+            const nextUrl = new URL(String(location), url).toString();
+            void netRequestRaw(nextUrl, opts, maxRedirects - 1)
+              .then(resolve)
+              .catch(reject);
+          } catch (e) {
+            reject(e);
+          }
+        });
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: any) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        resolve({
+          status,
+          headers: responseHeaders,
+          body: chunks.length ? Buffer.concat(chunks) : Buffer.from([]),
+        });
+      });
+      response.on("error", reject);
+    });
+
+    request.on("error", reject);
+    request.end();
+  });
+};
 
 ipcMain.handle(
   "matcha:avatar:sync",
@@ -2416,6 +2600,134 @@ ipcMain.handle("premium:oauth:start", async () => {
     return { ok: false, displayName: "", error: message };
   } finally {
     cleanup();
+  }
+});
+
+ipcMain.handle(
+  "offline-token:refresh",
+  async (
+    _,
+    payload: {
+      username: string;
+      accountType?: string | null;
+      customUUID?: string | null;
+    },
+  ) => {
+    try {
+      const username = String(payload?.username ?? "").trim();
+      const accountTypeRaw = String(payload?.accountType ?? "").trim();
+      const accountType: "premium" | "nopremium" | null =
+        accountTypeRaw === "premium"
+          ? "premium"
+          : accountTypeRaw === "nopremium"
+            ? "nopremium"
+            : null;
+      if (!accountType) return { ok: false, error: "Missing/invalid accountType" };
+      if (!username && accountType !== "premium") return { ok: false, error: "Missing username" };
+
+      const normalizeUuid = (raw: string): string | null => {
+        const trimmed = String(raw ?? "").trim();
+        if (!trimmed) return null;
+
+        const compact = trimmed.replace(/-/g, "");
+        if (/^[0-9a-fA-F]{32}$/.test(compact)) {
+          const lower = compact.toLowerCase();
+          return `${lower.slice(0, 8)}-${lower.slice(8, 12)}-${lower.slice(12, 16)}-${lower.slice(16, 20)}-${lower.slice(20)}`;
+        }
+
+        if (
+          /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+            trimmed,
+          )
+        ) {
+          return trimmed.toLowerCase();
+        }
+
+        return null;
+      };
+
+      let uuid: string;
+      let effectiveUsername = username;
+
+      if (accountType === "premium") {
+        const p = await fetchPremiumLauncherPrimaryProfile();
+        uuid = p.uuid;
+        effectiveUsername = p.username;
+      } else {
+        const customUuidRaw = String(payload?.customUUID ?? "").trim();
+        const normalized = customUuidRaw ? normalizeUuid(customUuidRaw) : null;
+        uuid = normalized ?? genUUID(username);
+      }
+
+      if (accountType === "premium") {
+        // Cache official JWKS best-effort so Premium offline can work without network.
+        try {
+          await ensureOfficialJwks({ forceRefresh: true });
+        } catch {
+          // ignore
+        }
+        await ensureOfflineToken({
+          accountType,
+          username: effectiveUsername,
+          uuid,
+          issuer: "https://sessions.hytale.com",
+          forceRefresh: true,
+        });
+      } else {
+        // No-premium stores two variants.
+        // Also refresh Butter JWKS cache so offline validation can be pre-seeded.
+        try {
+          await ensureButterJwks({ forceRefresh: true });
+        } catch {
+          // ignore
+        }
+        // Also cache official JWKS in case the user switches to Premium later.
+        try {
+          await ensureOfficialJwks({ forceRefresh: true });
+        } catch {
+          // ignore
+        }
+        await ensureOfflineToken({
+          accountType,
+          username: effectiveUsername,
+          uuid,
+          issuer: "https://sessions.butter.lat",
+          forceRefresh: true,
+        });
+        await ensureOfflineToken({
+          accountType,
+          username: effectiveUsername,
+          uuid,
+          issuer: "https://sessions.hytale.com",
+          forceRefresh: true,
+        });
+      }
+
+      return { ok: true, uuid };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unknown error";
+      return { ok: false, error: message };
+    }
+  },
+);
+
+ipcMain.handle("butter-jwks:refresh", async () => {
+  try {
+    const jwks = await ensureButterJwks({ forceRefresh: true });
+    return { ok: true, keys: Array.isArray((jwks as any)?.keys) ? (jwks as any).keys.length : 0 };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    return { ok: false, error: message };
+  }
+});
+
+ipcMain.handle("official-jwks:refresh", async () => {
+  try {
+    const jwks = await ensureOfficialJwks({ forceRefresh: true });
+    return { ok: true, keys: Array.isArray((jwks as any)?.keys) ? (jwks as any).keys.length : 0 };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    return { ok: false, error: message };
   }
 });
 
@@ -4271,6 +4583,55 @@ ipcMain.handle(
       hostServerProc = null;
       hostServerOwnerWindowId = null;
       return { ok: false, error: { code: "SPAWN_FAILED", message: String(err) } };
+    }
+  },
+);
+
+ipcMain.handle(
+  "host-server:open-current-folder",
+  async (
+    _e,
+    gameDir: string,
+    version: GameVersion,
+  ): Promise<{ ok: boolean; path?: string; error?: string }> => {
+    const baseDir = typeof gameDir === "string" ? gameDir.trim() : "";
+    if (!baseDir) return { ok: false, error: "Missing gameDir" };
+    if (!version || typeof version !== "object") return { ok: false, error: "Missing version" };
+
+    try {
+      migrateLegacyChannelInstallIfNeeded(baseDir, version.type);
+    } catch {
+      // ignore
+    }
+
+    let installDir: string;
+    try {
+      installDir = resolveExistingInstallDir(baseDir, version);
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+
+    // Prefer the directory containing the server jar if we can resolve it.
+    // Otherwise fall back to installDir/Server.
+    let folderToOpen = path.join(installDir, "Server");
+    try {
+      const serverPath = resolveServerPath(installDir);
+      if (serverPath) folderToOpen = path.dirname(serverPath);
+    } catch {
+      // ignore
+    }
+
+    if (!fs.existsSync(folderToOpen)) {
+      // Last fallback: open the install root if Server folder doesn't exist.
+      folderToOpen = installDir;
+    }
+
+    try {
+      const result = await shell.openPath(folderToOpen);
+      if (result) return { ok: false, error: result, path: folderToOpen };
+      return { ok: true, path: folderToOpen };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err), path: folderToOpen };
     }
   },
 );

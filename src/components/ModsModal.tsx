@@ -73,6 +73,12 @@ type InstalledModFile = {
   enabled: boolean;
 };
 
+type InstalledSort =
+  | "connectedToLauncher"
+  | "installedManually"
+  | "alphabetical"
+  | "needsUpdate";
+
 type ModProfile = {
   name: string;
   mods: string[]; // base names (no .disabled)
@@ -137,6 +143,11 @@ const ModsModal: React.FC<{
   const [modsDir, setModsDir] = useState<string>("");
   const [installedItems, setInstalledItems] = useState<InstalledModFile[]>([]);
 
+  const [installedSort, setInstalledSort] = useState<InstalledSort>(
+    "connectedToLauncher",
+  );
+  const [installedSortAsc, setInstalledSortAsc] = useState(true);
+
   const [attachPrompt, setAttachPrompt] = useState<{
     open: boolean;
     fileName: string;
@@ -189,6 +200,20 @@ const ModsModal: React.FC<{
     () => new Set(),
   );
   const [profileModsOrder, setProfileModsOrder] = useState<string[]>([]);
+
+  const [profileCtxMenu, setProfileCtxMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    name: string;
+  }>({ open: false, x: 0, y: 0, name: "" });
+
+  const [renameProfilePrompt, setRenameProfilePrompt] = useState<{
+    open: boolean;
+    oldName: string;
+  }>({ open: false, oldName: "" });
+  const [renameProfileInput, setRenameProfileInput] = useState<string>("");
+  const [renameProfileError, setRenameProfileError] = useState<string>("");
 
   const [shareWorking, setShareWorking] = useState(false);
   const [shareError, setShareError] = useState<string>("");
@@ -678,6 +703,14 @@ const ModsModal: React.FC<{
     setImportPreviewOpen(false);
     setImportPreviewPack(null);
     setIntegrityPrompt({ open: false, title: "", message: "" });
+
+    setInstalledSort("connectedToLauncher");
+    setInstalledSortAsc(true);
+
+    setProfileCtxMenu({ open: false, x: 0, y: 0, name: "" });
+    setRenameProfilePrompt({ open: false, oldName: "" });
+    setRenameProfileInput("");
+    setRenameProfileError("");
   }, [open]);
 
   useEffect(() => {
@@ -715,6 +748,64 @@ const ModsModal: React.FC<{
     }
     return map;
   }, [registryByModId]);
+
+  const sortedInstalledItems = useMemo(() => {
+    const decorated = installedItems.map((it, idx) => {
+      const base = baseName(it.fileName).trim();
+      const reg = base
+        ? registryByBaseName.get(base.toLowerCase()) ?? null
+        : null;
+      const isManual = !reg;
+      const managedModId = reg?.modId;
+      const checked =
+        typeof managedModId === "number"
+          ? checkedUpdatesByModId[managedModId]
+          : undefined;
+      const updateAvailable = !!checked?.updateAvailable;
+      return {
+        it,
+        idx,
+        base,
+        isManual,
+        connected: !isManual,
+        updateAvailable,
+      };
+    });
+
+    const dir = installedSortAsc ? 1 : -1;
+    const cmpStr = (a: string, b: string) => a.localeCompare(b) * dir;
+    const cmpGroup = (aFirst: boolean, bFirst: boolean) => {
+      const av = aFirst ? 0 : 1;
+      const bv = bFirst ? 0 : 1;
+      if (av !== bv) return (av - bv) * dir;
+      return 0;
+    };
+
+    decorated.sort((a, b) => {
+      if (installedSort === "connectedToLauncher") {
+        const g = cmpGroup(a.connected, b.connected);
+        if (g) return g;
+      } else if (installedSort === "installedManually") {
+        const g = cmpGroup(a.isManual, b.isManual);
+        if (g) return g;
+      } else if (installedSort === "needsUpdate") {
+        const g = cmpGroup(a.updateAvailable, b.updateAvailable);
+        if (g) return g;
+      }
+
+      const s = cmpStr(a.base, b.base);
+      if (s) return s;
+      return a.idx - b.idx;
+    });
+
+    return decorated.map((x) => x.it);
+  }, [
+    installedItems,
+    registryByBaseName,
+    checkedUpdatesByModId,
+    installedSort,
+    installedSortAsc,
+  ]);
 
   const ATTACH_LINK_EXAMPLE = "https://www.curseforge.com/hytale/mods/example";
   const isValidAttachLink = (url: string) => {
@@ -1634,444 +1725,484 @@ const ModsModal: React.FC<{
                 </>
               )}
             </div>
-          ) : tab === "installed" ? (
-            <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-4">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <div>
-                  <div className="text-sm text-white font-semibold">
-                    {t("modsModal.installedMods")}
-                  </div>
-                  <div className="text-[11px] text-gray-400 break-all">
-                    {modsDir || ""}
-                  </div>
-                  <div className="text-[11px] text-gray-400">
-                    {t("modsModal.installed.counts", {
-                      downloaded: formatNumber(installedItems.length),
-                      active: formatNumber(
-                        installedItems.reduce(
-                          (n, it) => n + (it?.enabled ? 1 : 0),
-                          0,
-                        ),
+          ) :  tab === "installed" ? (
+  <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-4">
+    {/* Contenedor de botones principales centrado */}
+    <div className="flex items-center justify-center gap-3 mb-2 w-full">
+      <div className="flex items-center justify-center gap-2 flex-wrap">
+        <button
+          type="button"
+          className={cn(
+            "px-3 py-2 rounded-lg border border-[#2a3146]",
+            "bg-transparent hover:bg-white/5 text-gray-200 transition",
+            (installedLoading || updatesWorking) &&
+              "opacity-60 cursor-not-allowed",
+          )}
+          onClick={() => {
+            void (async () => {
+              try {
+                setUpdatesWorking(true);
+                setInstalledError("");
+                const dir = await ensureGameDir();
+                if (checkedAllOnce) {
+                  const res = await window.config.modsUpdateAll(dir);
+                  if (res && (res as any).ok === false) {
+                    setInstalledError(
+                      formatModsError(
+                        res,
+                        "modsModal.installed.updateFailed",
                       ),
-                    })}
+                    );
+                  }
+                  setCheckedUpdatesByModId({});
+                  await loadInstalled(false);
+                } else {
+                  const res = await window.config.modsCheckUpdatesAll(
+                    dir,
+                  );
+                  if (res && (res as any).ok === false) {
+                    setInstalledError(
+                      formatModsError(
+                        res,
+                        "modsModal.installed.checkFailed",
+                      ),
+                    );
+                    return;
+                  }
+
+                  const results = Array.isArray(
+                    (res as any).results,
+                  )
+                    ? ((res as any).results as Array<any>)
+                    : [];
+
+                  const next: Record<
+                    number,
+                    {
+                      updateAvailable: boolean;
+                      latestFileId: number | null;
+                      latestName: string;
+                    }
+                  > = {};
+                  for (const r of results) {
+                    const id = Number(r?.modId);
+                    if (!Number.isFinite(id) || id <= 0) continue;
+                    next[id] = {
+                      updateAvailable: !!r?.updateAvailable,
+                      latestFileId:
+                        typeof r?.latestFileId === "number"
+                          ? r.latestFileId
+                          : null,
+                      latestName:
+                        typeof r?.latestName === "string"
+                          ? r.latestName
+                          : "",
+                    };
+                  }
+                  setCheckedUpdatesByModId(next);
+                  setCheckedAllOnce(true);
+                }
+              } catch {
+                // ignore
+              } finally {
+                setUpdatesWorking(false);
+              }
+            })();
+          }}
+          disabled={installedLoading || updatesWorking}
+          title={t("modsModal.installed.checkUpdates")}
+        >
+          {checkedAllOnce
+            ? t("modsModal.installed.updateAll")
+            : t("modsModal.installed.checkUpdates")}
+        </button>
+
+        <button
+          type="button"
+          className={cn(
+            "px-3 py-2 rounded-lg border border-[#2a3146]",
+            "bg-[#23293a] hover:bg-[#2f3650] text-white transition",
+            installedLoading && "opacity-60 cursor-not-allowed",
+          )}
+          onClick={() => {
+            void (async () => {
+              try {
+                const dir = await ensureGameDir();
+                const res = await window.config.modsInstalledSetAll(
+                  dir,
+                  true,
+                );
+                if (res && (res as any).ok === false) {
+                  setInstalledError(
+                    formatModsError(
+                      res,
+                      "modsModal.errors.unknown",
+                    ),
+                  );
+                  return;
+                }
+                await loadInstalled();
+              } catch {
+                // ignore
+              }
+            })();
+          }}
+          disabled={installedLoading}
+          title={t("modsModal.installed.enableAll")}
+        >
+          {t("modsModal.installed.enableAll")}
+        </button>
+
+        <button
+          type="button"
+          className={cn(
+            "px-3 py-2 rounded-lg border border-[#2a3146]",
+            "bg-transparent hover:bg-white/5 text-gray-200 transition",
+            installedLoading && "opacity-60 cursor-not-allowed",
+          )}
+          onClick={() => {
+            void (async () => {
+              try {
+                const dir = await ensureGameDir();
+                const res = await window.config.modsInstalledSetAll(
+                  dir,
+                  false,
+                );
+                if (res && (res as any).ok === false) {
+                  setInstalledError(
+                    formatModsError(
+                      res,
+                      "modsModal.errors.unknown",
+                    ),
+                  );
+                  return;
+                }
+                await loadInstalled();
+              } catch {
+                // ignore
+              }
+            })();
+          }}
+          disabled={installedLoading}
+          title={t("modsModal.installed.disableAll")}
+        >
+          {t("modsModal.installed.disableAll")}
+        </button>
+
+        <button
+          type="button"
+          className={cn(
+            "px-3 py-2 rounded-lg border border-[#2a3146]",
+            "bg-[#23293a] hover:bg-[#2f3650] text-white transition flex items-center gap-2",
+            installedLoading && "opacity-60 cursor-not-allowed",
+          )}
+          onClick={() => void loadInstalled()}
+          disabled={installedLoading}
+          title={t("common.refresh")}
+        >
+          <IconRefresh size={18} />
+          {t("common.refresh")}
+        </button>
+        <button
+          type="button"
+          className="px-3 py-2 rounded-lg border border-[#2a3146] bg-transparent hover:bg-white/5 text-gray-200 transition flex items-center gap-2"
+          onClick={() => void handleOpenModsFolder()}
+        >
+          <IconFolderOpen size={18} />
+          {t("modsModal.installed.openFolder")}
+        </button>
+      </div>
+    </div>
+
+    <div className="text-[11px] text-gray-400 overflow-x-auto whitespace-nowrap mt-2">
+      {t("modsModal.installed.counts", {
+        downloaded: formatNumber(installedItems.length),
+        active: formatNumber(
+          installedItems.reduce(
+            (n, it) => n + (it?.enabled ? 1 : 0),
+            0,
+          ),
+        ),
+      })}
+    </div>
+
+    <div
+      className="text-[11px] text-gray-400 overflow-x-auto whitespace-nowrap select-text"
+      title={modsDir || ""}
+    >
+      {modsDir || ""}
+    </div>
+
+    {installedError ? (
+      <div className="text-xs text-red-300 mb-2">
+        {installedError}
+      </div>
+    ) : null}
+
+    {/* Separador de Ordenamiento con Opciones */}
+    <div className="flex items-center gap-4 px-2 mt-4 mb-2 text-sm border-b border-white/5 pb-2">
+      <span className="text-gray-400 font-medium">{t("common.sortBy")}:</span>
+      
+      <div className="flex items-center gap-3 overflow-x-auto whitespace-nowrap">
+        {[
+          { id: "connectedToLauncher", label: t("modsModal.installed.sort.connectedToLauncher") },
+          { id: "installedManually", label: t("modsModal.installed.sort.installedManually") },
+          { id: "alphabetical", label: t("modsModal.installed.sort.alphabetical") },
+          { id: "needsUpdate", label: t("modsModal.installed.sort.needsUpdate") },
+        ].map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setInstalledSort(opt.id as InstalledSort)}
+            disabled={installedLoading}
+            className={cn(
+              "transition-colors outline-none",
+              installedSort === opt.id 
+                ? "text-blue-400 font-semibold" 
+                : "text-gray-500 hover:text-gray-300"
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setInstalledSortAsc((v) => !v)}
+        disabled={installedLoading}
+        // AQUÍ ESTÁ EL CAMBIO: text-blue-400 y hover:text-blue-300
+        className="ml-auto flex items-center justify-center rounded-md text-blue-400 hover:text-blue-300 hover:bg-white/5 transition outline-none text-xl px-2"
+        title={installedSortAsc ? t("common.ascending") : t("common.descending")}
+      >
+        {installedSortAsc ? "↑" : "↓"}
+      </button>
+    </div>
+
+    <div className="pr-1 rounded-lg border border-[#2a3146] bg-[#141824]/60">
+      {installedLoading ? (
+        <div className="p-3 text-xs text-gray-100">
+          {t("common.loading")}
+        </div>
+      ) : sortedInstalledItems.length ? (
+        sortedInstalledItems.map((it) => (
+          (() => {
+            const base = baseName(it.fileName).trim();
+            const reg = base
+              ? registryByBaseName.get(base.toLowerCase()) ?? null
+              : null;
+            const managedModId = reg?.modId;
+            const isManual = !reg;
+
+            const canCheckUpdate =
+              typeof managedModId === "number" &&
+              Number.isFinite(managedModId) &&
+              managedModId > 0;
+
+            const checked =
+              typeof managedModId === "number"
+                ? checkedUpdatesByModId[managedModId]
+                : undefined;
+
+            return (
+              <div
+                key={it.fileName}
+                className="flex items-center justify-between gap-3 px-3 py-2 border-b border-white/5"
+              >
+                <div className="min-w-0">
+                  <div className="text-xs text-white truncate">
+                    {it.fileName}
                   </div>
+                  <div className="mt-0.5 flex items-center gap-2">
+                    <div
+                      className={cn(
+                        "px-2 py-0.5 rounded-full border text-[10px] font-semibold",
+                        it.enabled
+                          ? "border-green-400/30 bg-green-500/10 text-green-200"
+                          : "border-gray-500/30 bg-white/5 text-gray-300",
+                      )}
+                    >
+                      {it.enabled ? t("common.enabled") : t("common.disabled")}
+                    </div>
+
+                    {isManual ? (
+                      <div className="text-[10px] text-yellow-300">
+                        {t("modsModal.installed.installedManually")}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {!isManual && checked?.updateAvailable ? (
+                    <div className="text-[10px] text-gray-400 mt-0.5 truncate">
+                      {t("modsModal.installed.latestVersion")}: {checked.latestName || ""}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className={cn(
-                      "px-3 py-2 rounded-lg border border-[#2a3146]",
-                      "bg-transparent hover:bg-white/5 text-gray-200 transition",
-                      (installedLoading || updatesWorking) &&
-                        "opacity-60 cursor-not-allowed",
-                    )}
-                    onClick={() => {
-                      void (async () => {
-                        try {
-                          setUpdatesWorking(true);
-                          setInstalledError("");
-                          const dir = await ensureGameDir();
-                          if (checkedAllOnce) {
-                            const res = await window.config.modsUpdateAll(dir);
-                            if (res && (res as any).ok === false) {
-                              setInstalledError(
-                                formatModsError(
-                                  res,
-                                  "modsModal.installed.updateFailed",
-                                ),
-                              );
-                            }
-                            setCheckedUpdatesByModId({});
-                            await loadInstalled(false);
-                          } else {
-                            const res = await window.config.modsCheckUpdatesAll(
-                              dir,
-                            );
-                            if (res && (res as any).ok === false) {
-                              setInstalledError(
-                                formatModsError(
-                                  res,
-                                  "modsModal.installed.checkFailed",
-                                ),
-                              );
-                              return;
-                            }
-
-                            const results = Array.isArray(
-                              (res as any).results,
-                            )
-                              ? ((res as any).results as Array<any>)
-                              : [];
-
-                            const next: Record<
-                              number,
-                              {
-                                updateAvailable: boolean;
-                                latestFileId: number | null;
-                                latestName: string;
-                              }
-                            > = {};
-                            for (const r of results) {
-                              const id = Number(r?.modId);
-                              if (!Number.isFinite(id) || id <= 0) continue;
-                              next[id] = {
-                                updateAvailable: !!r?.updateAvailable,
-                                latestFileId:
-                                  typeof r?.latestFileId === "number"
-                                    ? r.latestFileId
-                                    : null,
-                                latestName:
-                                  typeof r?.latestName === "string"
-                                    ? r.latestName
-                                    : "",
-                              };
-                            }
-                            setCheckedUpdatesByModId(next);
-                            setCheckedAllOnce(true);
-                          }
-                        } catch {
-                          // ignore
-                        } finally {
-                          setUpdatesWorking(false);
-                        }
-                      })();
-                    }}
-                    disabled={installedLoading || updatesWorking}
-                    title={t("modsModal.installed.checkUpdates")}
-                  >
-                    {checkedAllOnce
-                      ? t("modsModal.installed.updateAll")
-                      : t("modsModal.installed.checkUpdates")}
-                  </button>
-
-                  <button
-                    type="button"
-                    className={cn(
-                      "px-3 py-2 rounded-lg border border-[#2a3146]",
-                      "bg-[#23293a] hover:bg-[#2f3650] text-white transition",
-                      installedLoading && "opacity-60 cursor-not-allowed",
-                    )}
-                    onClick={() => {
-                      void (async () => {
-                        try {
-                          const dir = await ensureGameDir();
-                          const res = await window.config.modsInstalledSetAll(
-                            dir,
-                            true,
-                          );
-                          if (res && (res as any).ok === false) {
-                            setInstalledError(
-                              formatModsError(
-                                res,
-                                "modsModal.errors.unknown",
-                              ),
-                            );
-                            return;
-                          }
-                          await loadInstalled();
-                        } catch {
-                          // ignore
-                        }
-                      })();
-                    }}
-                    disabled={installedLoading}
-                    title={t("modsModal.installed.enableAll")}
-                  >
-                    {t("modsModal.installed.enableAll")}
-                  </button>
-
-                  <button
-                    type="button"
-                    className={cn(
-                      "px-3 py-2 rounded-lg border border-[#2a3146]",
-                      "bg-transparent hover:bg-white/5 text-gray-200 transition",
-                      installedLoading && "opacity-60 cursor-not-allowed",
-                    )}
-                    onClick={() => {
-                      void (async () => {
-                        try {
-                          const dir = await ensureGameDir();
-                          const res = await window.config.modsInstalledSetAll(
-                            dir,
-                            false,
-                          );
-                          if (res && (res as any).ok === false) {
-                            setInstalledError(
-                              formatModsError(
-                                res,
-                                "modsModal.errors.unknown",
-                              ),
-                            );
-                            return;
-                          }
-                          await loadInstalled();
-                        } catch {
-                          // ignore
-                        }
-                      })();
-                    }}
-                    disabled={installedLoading}
-                    title={t("modsModal.installed.disableAll")}
-                  >
-                    {t("modsModal.installed.disableAll")}
-                  </button>
-
-                  <button
-                    type="button"
-                    className={cn(
-                      "px-3 py-2 rounded-lg border border-[#2a3146]",
-                      "bg-[#23293a] hover:bg-[#2f3650] text-white transition flex items-center gap-2",
-                      installedLoading && "opacity-60 cursor-not-allowed",
-                    )}
-                    onClick={() => void loadInstalled()}
-                    disabled={installedLoading}
-                    title={t("common.refresh")}
-                  >
-                    <IconRefresh size={18} />
-                    {t("common.refresh")}
-                  </button>
-                  <button
-                    type="button"
-                    className="px-3 py-2 rounded-lg border border-[#2a3146] bg-transparent hover:bg-white/5 text-gray-200 transition flex items-center gap-2"
-                    onClick={() => void handleOpenModsFolder()}
-                  >
-                    <IconFolderOpen size={18} />
-                    {t("modsModal.installed.openFolder")}
-                  </button>
-                </div>
-              </div>
-
-              {installedError ? (
-                <div className="text-xs text-red-300 mb-2">
-                  {installedError}
-                </div>
-              ) : null}
-
-              <div className="pr-1 rounded-lg border border-[#2a3146] bg-[#141824]/60">
-                {installedLoading ? (
-                  <div className="p-3 text-xs text-gray-100">
-                    {t("common.loading")}
-                  </div>
-                ) : installedItems.length ? (
-                  installedItems.map((it) => (
-                    (() => {
-                      const base = baseName(it.fileName).trim();
-                      const reg = base
-                        ? registryByBaseName.get(base.toLowerCase()) ?? null
-                        : null;
-                      const managedModId = reg?.modId;
-                      const isManual = !reg;
-
-                      const canCheckUpdate =
-                        typeof managedModId === "number" &&
-                        Number.isFinite(managedModId) &&
-                        managedModId > 0;
-
-                      const checked =
-                        typeof managedModId === "number"
-                          ? checkedUpdatesByModId[managedModId]
-                          : undefined;
-
-                      return (
-                    <div
-                      key={it.fileName}
-                      className="flex items-center justify-between gap-3 px-3 py-2 border-b border-white/5"
+                  {isManual ? (
+                    <button
+                      type="button"
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg border border-[#2a3146] text-xs",
+                        "bg-transparent hover:bg-white/5 text-yellow-100 transition",
+                      )}
+                      onClick={() => openAttachPrompt(it.fileName)}
+                      title={t("modsModal.installed.attachToLauncher")}
                     >
-                      <div className="min-w-0">
-                        <div className="text-xs text-white truncate">
-                          {it.fileName}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-2">
-                          <div
-                            className={cn(
-                              "text-[10px]",
-                              it.enabled ? "text-green-300" : "text-gray-400",
-                            )}
-                          >
-                            {it.enabled
-                              ? t("common.enabled")
-                              : t("common.disabled")}
-                          </div>
-
-                          {isManual ? (
-                            <div className="text-[10px] text-yellow-300">
-                              {t("modsModal.installed.installedManually")}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        {!isManual && checked?.updateAvailable ? (
-                          <div className="text-[10px] text-gray-400 mt-0.5 truncate">
-                            {t("modsModal.installed.latestVersion")}: {checked.latestName || ""}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {isManual ? (
-                          <button
-                            type="button"
-                            className={cn(
-                              "px-3 py-1.5 rounded-lg border border-[#2a3146] text-xs",
-                              "bg-transparent hover:bg-white/5 text-yellow-100 transition",
-                            )}
-                            onClick={() => openAttachPrompt(it.fileName)}
-                            title={t("modsModal.installed.attachToLauncher")}
-                          >
-                            {t("modsModal.installed.attachToLauncher")}
-                          </button>
-                        ) : canCheckUpdate ? (
-                          <button
-                            type="button"
-                            className={cn(
-                              "px-3 py-1.5 rounded-lg border border-[#2a3146] text-xs",
-                              "bg-transparent hover:bg-white/5 text-gray-200 transition",
-                              (updatesWorking || installingId === managedModId) &&
-                                "opacity-60 cursor-not-allowed",
-                            )}
-                            disabled={updatesWorking || installingId === managedModId}
-                            onClick={() => {
-                              void (async () => {
-                                try {
-                                  setUpdatesWorking(true);
-                                  setInstalledError("");
-                                  const dir = await ensureGameDir();
-                                  if (checked?.updateAvailable) {
-                                    setInstallingId(managedModId);
-                                    const res = await window.config.modsUpdateOne(
-                                      dir,
-                                      managedModId,
-                                    );
-                                    if (res && (res as any).ok === false) {
-                                      setInstalledError(
-                                        formatModsError(
-                                          res,
-                                          "modsModal.installed.updateFailed",
-                                        ),
-                                      );
-                                    }
-                                    setCheckedUpdatesByModId((prev) => {
-                                      const copy = { ...prev };
-                                      delete copy[managedModId];
-                                      return copy;
-                                    });
-                                    await loadInstalled(false);
-                                  } else {
-                                    const res =
-                                      await window.config.modsCheckUpdateOne(
-                                        dir,
-                                        managedModId,
-                                      );
-                                    if (res && (res as any).ok === false) {
-                                      setInstalledError(
-                                        formatModsError(
-                                          res,
-                                          "modsModal.installed.checkFailed",
-                                        ),
-                                      );
-                                      return;
-                                    }
-
-                                    setCheckedUpdatesByModId((prev) => ({
-                                      ...prev,
-                                      [managedModId]: {
-                                        updateAvailable: !!(res as any)
-                                          ?.updateAvailable,
-                                        latestFileId:
-                                          typeof (res as any)?.latestFileId ===
-                                          "number"
-                                            ? (res as any).latestFileId
-                                            : null,
-                                        latestName:
-                                          typeof (res as any)?.latestName ===
-                                          "string"
-                                            ? (res as any).latestName
-                                            : "",
-                                      },
-                                    }));
-                                  }
-                                } catch {
-                                  // ignore
-                                } finally {
-                                  setInstallingId(null);
-                                  setUpdatesWorking(false);
-                                }
-                              })();
-                            }}
-                            title={t("modsModal.installed.checkUpdate")}
-                          >
-                            {checked?.updateAvailable
-                              ? t("modsModal.installed.update")
-                              : t("modsModal.installed.checkUpdate")}
-                          </button>
-                        ) : null}
-
-                        <button
-                          type="button"
-                          className={cn(
-                            "px-3 py-1.5 rounded-lg border border-[#2a3146] text-xs",
-                            it.enabled
-                              ? "bg-transparent hover:bg-white/5 text-gray-200"
-                              : "bg-[#23293a] hover:bg-[#2f3650] text-white",
-                            "transition",
-                          )}
-                          onClick={() => {
-                            void (async () => {
-                              try {
-                                const dir = await ensureGameDir();
-                                const res =
-                                  await window.config.modsInstalledToggle(
-                                  dir,
-                                  it.fileName,
+                      {t("modsModal.installed.attachToLauncher")}
+                    </button>
+                  ) : canCheckUpdate ? (
+                    <button
+                      type="button"
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg border border-[#2a3146] text-xs",
+                        "bg-transparent hover:bg-white/5 text-gray-200 transition",
+                        (updatesWorking || installingId === managedModId) &&
+                          "opacity-60 cursor-not-allowed",
+                      )}
+                      disabled={updatesWorking || installingId === managedModId}
+                      onClick={() => {
+                        void (async () => {
+                          try {
+                            setUpdatesWorking(true);
+                            setInstalledError("");
+                            const dir = await ensureGameDir();
+                            if (checked?.updateAvailable) {
+                              setInstallingId(managedModId);
+                              const res = await window.config.modsUpdateOne(
+                                dir,
+                                managedModId,
+                              );
+                              if (res && (res as any).ok === false) {
+                                setInstalledError(
+                                  formatModsError(
+                                    res,
+                                    "modsModal.installed.updateFailed",
+                                  ),
                                 );
-                                if (res && (res as any).ok === false) {
-                                  setInstalledError(
-                                    formatModsError(
-                                      res,
-                                      "modsModal.errors.unknown",
-                                    ),
-                                  );
-                                  return;
-                                }
-                                await loadInstalled(false);
-                              } catch {
-                                // ignore
                               }
-                            })();
-                          }}
-                          title={t("common.toggle")}
-                        >
-                          {it.enabled
-                            ? t("common.disable")
-                            : t("common.enable")}
-                        </button>
+                              setCheckedUpdatesByModId((prev) => {
+                                const copy = { ...prev };
+                                delete copy[managedModId];
+                                return copy;
+                              });
+                              await loadInstalled(false);
+                            } else {
+                              const res =
+                                await window.config.modsCheckUpdateOne(
+                                  dir,
+                                  managedModId,
+                                );
+                              if (res && (res as any).ok === false) {
+                                setInstalledError(
+                                  formatModsError(
+                                    res,
+                                    "modsModal.installed.checkFailed",
+                                  ),
+                                );
+                                return;
+                              }
 
-                        <button
-                          type="button"
-                          className="w-9 h-9 rounded-lg border border-[#2a3146] bg-transparent hover:bg-red-500/15 text-red-300 hover:text-red-200 transition flex items-center justify-center"
-                          onClick={() => {
-                            setDeleteModPrompt({
-                              open: true,
-                              fileName: it.fileName,
-                            });
-                          }}
-                          title={t("common.delete")}
-                        >
-                          <IconTrash size={18} />
-                        </button>
-                      </div>
-                    </div>
-                      );
-                    })()
-                  ))
-                ) : (
-                  <div className="p-3 text-xs text-gray-300">
-                    {t("modsModal.noInstalledModsFound")}
-                  </div>
-                )}
+                              setCheckedUpdatesByModId((prev) => ({
+                                ...prev,
+                                [managedModId]: {
+                                  updateAvailable: !!(res as any)
+                                    ?.updateAvailable,
+                                  latestFileId:
+                                    typeof (res as any)?.latestFileId ===
+                                    "number"
+                                      ? (res as any).latestFileId
+                                      : null,
+                                  latestName:
+                                    typeof (res as any)?.latestName ===
+                                    "string"
+                                      ? (res as any).latestName
+                                      : "",
+                                },
+                              }));
+                            }
+                          } catch {
+                            // ignore
+                          } finally {
+                            setInstallingId(null);
+                            setUpdatesWorking(false);
+                          }
+                        })();
+                      }}
+                      title={t("modsModal.installed.checkUpdate")}
+                    >
+                      {checked?.updateAvailable
+                        ? t("modsModal.installed.update")
+                        : t("modsModal.installed.checkUpdate")}
+                    </button>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg border border-[#2a3146] text-xs",
+                      it.enabled
+                        ? "bg-transparent hover:bg-white/5 text-gray-200"
+                        : "bg-[#23293a] hover:bg-[#2f3650] text-white",
+                      "transition",
+                    )}
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          const dir = await ensureGameDir();
+                          const res =
+                            await window.config.modsInstalledToggle(
+                            dir,
+                            it.fileName,
+                          );
+                          if (res && (res as any).ok === false) {
+                            setInstalledError(
+                              formatModsError(
+                                res,
+                                "modsModal.errors.unknown",
+                              ),
+                            );
+                            return;
+                          }
+                          await loadInstalled(false);
+                        } catch {
+                          // ignore
+                        }
+                      })();
+                    }}
+                    title={t("common.toggle")}
+                  >
+                    {it.enabled
+                      ? t("common.disable")
+                      : t("common.enable")}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="w-9 h-9 rounded-lg border border-[#2a3146] bg-transparent hover:bg-red-500/15 text-red-300 hover:text-red-200 transition flex items-center justify-center"
+                    onClick={() => {
+                      setDeleteModPrompt({
+                        open: true,
+                        fileName: it.fileName,
+                      });
+                    }}
+                    title={t("common.delete")}
+                  >
+                    <IconTrash size={18} />
+                  </button>
+                </div>
               </div>
-            </div>
+            );
+          })()
+        ))
+      ) : (
+        <div className="p-3 text-xs text-gray-300">
+          {t("modsModal.noInstalledModsFound")}
+        </div>
+      )}
+    </div>
+  </div>
           ) : (
             <div className="grid grid-cols-[260px_1fr] gap-4 min-h-0 h-full">
               <div className="rounded-lg border border-[#2a3146] bg-[#1f2538]/70 p-3 flex flex-col min-h-0">
@@ -2191,6 +2322,7 @@ const ModsModal: React.FC<{
                   ) : profiles.length ? (
                     profiles.map((p) => {
                       const active = p.name === selectedProfileName;
+                      const isVanilla = p.name.toLowerCase() === "vanilla";
                       return (
                         <button
                           key={p.name}
@@ -2222,6 +2354,16 @@ const ModsModal: React.FC<{
                               return a.localeCompare(b);
                             });
                             setProfileModsOrder(names);
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            if (isVanilla) return;
+                            setProfileCtxMenu({
+                              open: true,
+                              x: e.clientX,
+                              y: e.clientY,
+                              name: p.name,
+                            });
                           }}
                         >
                           <div className="text-xs text-white truncate">
@@ -3039,6 +3181,103 @@ const ModsModal: React.FC<{
       </div>
 
       <ConfirmModal
+        open={renameProfilePrompt.open}
+        title={t("modsModal.profiles.rename.title")}
+        message={
+          <div>
+            <div className="text-xs text-gray-200 mb-2">
+              {t("modsModal.profiles.rename.hint", {
+                name: renameProfilePrompt.oldName,
+              })}
+            </div>
+
+            <input
+              value={renameProfileInput}
+              onChange={(e) => {
+                setRenameProfileInput(e.target.value);
+                if (renameProfileError) setRenameProfileError("");
+              }}
+              placeholder={t("modsModal.profiles.rename.placeholder")}
+              className="w-full px-3 py-2 rounded-lg bg-[#141824]/80 border border-[#2a3146] text-white text-sm outline-none focus:border-blue-400/60"
+              autoFocus
+            />
+
+            {renameProfileError ? (
+              <div className="text-[11px] text-red-300 mt-2">
+                {renameProfileError}
+              </div>
+            ) : null}
+          </div>
+        }
+        confirmText={t("common.confirm")}
+        cancelText={t("common.cancel")}
+        onCancel={() => {
+          setRenameProfilePrompt({ open: false, oldName: "" });
+          setRenameProfileInput("");
+          setRenameProfileError("");
+        }}
+        onConfirm={() => {
+          void (async () => {
+            try {
+              const oldName = renameProfilePrompt.oldName;
+              const nextName = sanitizeProfileName(renameProfileInput);
+              if (!nextName) {
+                setRenameProfileError(t("modsModal.profiles.rename.invalid"));
+                return;
+              }
+
+              const existingName = profiles.find(
+                (p) => p.name.toLowerCase() === nextName.toLowerCase(),
+              )?.name;
+              if (
+                existingName &&
+                existingName.toLowerCase() !== oldName.toLowerCase()
+              ) {
+                setRenameProfileError(t("modsModal.profiles.rename.taken"));
+                return;
+              }
+
+              const profile = profiles.find((p) => p.name === oldName);
+              if (!profile) {
+                setRenameProfileError(t("modsModal.errors.profileNotFound"));
+                return;
+              }
+
+              const dir = await ensureGameDir();
+              const saveRes = await window.config.modsProfilesSave(dir, {
+                name: nextName,
+                mods: Array.isArray(profile.mods) ? profile.mods : [],
+                cf: profile.cf ?? {},
+              } as any);
+
+              if (saveRes && (saveRes as any).ok === false) {
+                setRenameProfileError(
+                  formatModsError(saveRes, "modsModal.errors.unknown"),
+                );
+                return;
+              }
+
+              // If it's only a case change, save already replaced it.
+              if (oldName.toLowerCase() !== nextName.toLowerCase()) {
+                await window.config.modsProfilesDelete(dir, oldName);
+              }
+
+              setRenameProfilePrompt({ open: false, oldName: "" });
+              setRenameProfileInput("");
+              setRenameProfileError("");
+              await loadProfiles();
+              setSelectedProfileName(nextName);
+              setProfileNameInput(nextName);
+            } catch (e) {
+              const message =
+                e instanceof Error ? e.message : t("modsModal.errors.unknown");
+              setRenameProfileError(message);
+            }
+          })();
+        }}
+      />
+
+      <ConfirmModal
         open={importPreviewOpen}
         title={t("modsModal.profiles.share.previewTitle")}
         message={(() => {
@@ -3446,6 +3685,44 @@ const ModsModal: React.FC<{
           resolve?.(true);
         }}
       />
+
+      {tab === "profiles" && profileCtxMenu.open ? createPortal(
+        <>
+          <div
+            className="fixed inset-0 z-[9999]"
+            onMouseDown={() =>
+              setProfileCtxMenu({ open: false, x: 0, y: 0, name: "" })
+            }
+          />
+          <div
+            className={cn(
+              "fixed z-[10000] min-w-[180px]",
+              "rounded-lg border border-[#2a3146] bg-[#141824]/90",
+              "shadow-2xl",
+            )}
+            style={{ left: profileCtxMenu.x, top: profileCtxMenu.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className={cn(
+                "w-full text-left px-3 py-2 text-xs text-gray-200",
+                "hover:bg-white/5 transition rounded-lg",
+              )}
+              onClick={() => {
+                const name = profileCtxMenu.name;
+                setProfileCtxMenu({ open: false, x: 0, y: 0, name: "" });
+                setRenameProfileError("");
+                setRenameProfileInput(name);
+                setRenameProfilePrompt({ open: true, oldName: name });
+              }}
+            >
+              {t("modsModal.profiles.rename.menu")}
+            </button>
+          </div>
+        </>,
+        document.body
+      ) : null}
     </div>
   );
 };

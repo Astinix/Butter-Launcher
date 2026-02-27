@@ -17,6 +17,11 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 const OFFICIAL_ACCOUNT_DATA_BASE = "https://account-data.hytale.com";
 const OFFICIAL_SESSIONS_BASE = "https://sessions.hytale.com";
 const DEFAULT_HYTALE_LAUNCHER_UA = "hytale-launcher/2026.02.12-54e579b";
+const OFFICIAL_ISSUER = "https://sessions.hytale.com";
+
+const BUTTER_SESSIONS_BASE =
+  String(process.env.BUTTER_SESSIONS_BASE ?? process.env.VITE_BUTTER_SESSIONS_BASE ?? "").trim() ||
+  "https://sessions.butter.lat";
 
 const premiumHttpDebugEnabled = () => {
   const raw = String(process.env.HYTALE_PREMIUM_HTTP_DEBUG ?? process.env.PREMIUM_HTTP_DEBUG ?? "").trim().toLowerCase();
@@ -42,6 +47,244 @@ const logPremiumHttp = (level: "info" | "warn" | "error", msg: string, data: any
 };
 
 const PREMIUM_AUTH_FILE = path.join(META_DIRECTORY, "premium-auth.json");
+
+const OFFLINE_TOKENS_FILE = path.join(META_DIRECTORY, "offline-tokens.json");
+const BUTTER_JWKS_CACHE_FILE = path.join(META_DIRECTORY, "butter-jwks.json");
+const OFFICIAL_JWKS_CACHE_FILE = path.join(META_DIRECTORY, "official-jwks.json");
+
+type OfflineTokensStore = {
+  updatedAt?: string;
+  // New: store tokens by issuer so we can keep multiple variants.
+  tokensByIssuer?: Record<string, Record<string, string>>;
+  // Legacy: older versions stored just one token map by uuid.
+  tokens?: Record<string, string>;
+};
+
+type Jwks = { keys: any[] };
+
+const readButterJwksBestEffort = (): Jwks | null => {
+  try {
+    if (!fs.existsSync(BUTTER_JWKS_CACHE_FILE)) return null;
+    const raw = fs.readFileSync(BUTTER_JWKS_CACHE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    const keys = parsed && typeof parsed === "object" ? (parsed as any).keys : null;
+    if (!Array.isArray(keys)) return null;
+    return { keys };
+  } catch {
+    return null;
+  }
+};
+
+const writeButterJwksBestEffort = (jwks: Jwks) => {
+  try {
+    fs.mkdirSync(path.dirname(BUTTER_JWKS_CACHE_FILE), { recursive: true });
+    const tmp = BUTTER_JWKS_CACHE_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(jwks, null, 2), "utf8");
+    fs.renameSync(tmp, BUTTER_JWKS_CACHE_FILE);
+  } catch {
+    // ignore
+  }
+};
+
+const refreshButterJwks = async (): Promise<Jwks> => {
+  const url = `${BUTTER_SESSIONS_BASE}/.well-known/jwks.json`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const res = await fetch(url, { method: "GET", signal: ctrl.signal, headers: { Accept: "application/json" } });
+    const text = await res.text().catch(() => "");
+    if (!res.ok) {
+      throw new Error(`Failed to fetch Butter JWKS (HTTP ${res.status})`);
+    }
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+    const keys = json && typeof json === "object" ? json.keys : null;
+    if (!Array.isArray(keys) || keys.length < 1) {
+      throw new Error("Butter JWKS invalid or empty");
+    }
+    const jwks: Jwks = { keys };
+    writeButterJwksBestEffort(jwks);
+    return jwks;
+  } finally {
+    try {
+      clearTimeout(timer);
+    } catch {
+      // ignore
+    }
+  }
+};
+
+export const ensureButterJwks = async (opts?: { forceRefresh?: boolean }): Promise<Jwks | null> => {
+  if (!opts?.forceRefresh) {
+    const cached = readButterJwksBestEffort();
+    if (cached) return cached;
+  }
+  try {
+    return await refreshButterJwks();
+  } catch {
+    // If network fails, fall back to cache.
+    return readButterJwksBestEffort();
+  }
+};
+
+const readOfficialJwksBestEffort = (): Jwks | null => {
+  try {
+    if (!fs.existsSync(OFFICIAL_JWKS_CACHE_FILE)) return null;
+    const raw = fs.readFileSync(OFFICIAL_JWKS_CACHE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    const keys = parsed && typeof parsed === "object" ? (parsed as any).keys : null;
+    if (!Array.isArray(keys)) return null;
+    return { keys };
+  } catch {
+    return null;
+  }
+};
+
+const writeOfficialJwksBestEffort = (jwks: Jwks) => {
+  try {
+    fs.mkdirSync(path.dirname(OFFICIAL_JWKS_CACHE_FILE), { recursive: true });
+    const tmp = OFFICIAL_JWKS_CACHE_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(jwks, null, 2), "utf8");
+    fs.renameSync(tmp, OFFICIAL_JWKS_CACHE_FILE);
+  } catch {
+    // ignore
+  }
+};
+
+const refreshOfficialJwks = async (): Promise<Jwks> => {
+  const url = `${OFFICIAL_SESSIONS_BASE}/.well-known/jwks.json`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const res = await fetch(url, { method: "GET", signal: ctrl.signal, headers: { Accept: "application/json" } });
+    const text = await res.text().catch(() => "");
+    if (!res.ok) {
+      throw new Error(`Failed to fetch Official JWKS (HTTP ${res.status})`);
+    }
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+    const keys = json && typeof json === "object" ? json.keys : null;
+    if (!Array.isArray(keys) || keys.length < 1) {
+      throw new Error("Official JWKS invalid or empty");
+    }
+    const jwks: Jwks = { keys };
+    writeOfficialJwksBestEffort(jwks);
+    return jwks;
+  } finally {
+    try {
+      clearTimeout(timer);
+    } catch {
+      // ignore
+    }
+  }
+};
+
+export const ensureOfficialJwks = async (opts?: { forceRefresh?: boolean }): Promise<Jwks | null> => {
+  if (!opts?.forceRefresh) {
+    const cached = readOfficialJwksBestEffort();
+    if (cached) return cached;
+  }
+  try {
+    return await refreshOfficialJwks();
+  } catch {
+    return readOfficialJwksBestEffort();
+  }
+};
+
+const readOfflineTokensStoreBestEffort = (): OfflineTokensStore => {
+  try {
+    if (!fs.existsSync(OFFLINE_TOKENS_FILE)) return { tokens: {} };
+    const raw = fs.readFileSync(OFFLINE_TOKENS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { tokens: {} };
+
+    const tokensByIssuerRaw = (parsed as any).tokensByIssuer;
+    const tokensRaw = (parsed as any).tokens;
+
+    const tokensByIssuer =
+      tokensByIssuerRaw && typeof tokensByIssuerRaw === "object"
+        ? (tokensByIssuerRaw as Record<string, Record<string, string>>)
+        : undefined;
+
+    const tokens =
+      tokensRaw && typeof tokensRaw === "object"
+        ? (tokensRaw as Record<string, string>)
+        : undefined;
+
+    return {
+      updatedAt: (parsed as any).updatedAt,
+      tokensByIssuer,
+      tokens,
+    };
+  } catch {
+    return { tokens: {} };
+  }
+};
+
+const writeOfflineTokensStoreBestEffort = (next: OfflineTokensStore) => {
+  try {
+    fs.mkdirSync(path.dirname(OFFLINE_TOKENS_FILE), { recursive: true });
+    const tmp = OFFLINE_TOKENS_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2), "utf8");
+    fs.renameSync(tmp, OFFLINE_TOKENS_FILE);
+  } catch {
+    // ignore
+  }
+};
+
+export const readStoredOfflineTokenBestEffort = (
+  uuid: string,
+  issuer?: string | null,
+): string | null => {
+  const u = String(uuid ?? "").trim().toLowerCase();
+  if (!u) return null;
+  const st = readOfflineTokensStoreBestEffort();
+
+  const iss = String(issuer ?? "").trim();
+  if (iss) {
+    const tok = st.tokensByIssuer?.[iss]?.[u] ?? null;
+    return typeof tok === "string" && tok.trim() ? tok.trim() : null;
+  }
+
+  // Fallback: prefer butter issuer (patched), then official issuer, then legacy map.
+  const fromButter = st.tokensByIssuer?.[BUTTER_SESSIONS_BASE]?.[u] ?? null;
+  if (typeof fromButter === "string" && fromButter.trim()) return fromButter.trim();
+  const fromOfficial = st.tokensByIssuer?.[OFFICIAL_ISSUER]?.[u] ?? null;
+  if (typeof fromOfficial === "string" && fromOfficial.trim()) return fromOfficial.trim();
+
+  const legacy = st.tokens?.[u] ?? null;
+  return typeof legacy === "string" && legacy.trim() ? legacy.trim() : null;
+};
+
+const storeOfflineTokenBestEffort = (uuid: string, issuer: string, token: string) => {
+  const u = String(uuid ?? "").trim().toLowerCase();
+  const iss = String(issuer ?? "").trim();
+  const t = String(token ?? "").trim();
+  if (!u || !iss || !t) return;
+  const cur = readOfflineTokensStoreBestEffort();
+
+  const tokensByIssuer: Record<string, Record<string, string>> = {
+    ...(cur.tokensByIssuer ?? {}),
+  };
+  const bucket = { ...(tokensByIssuer[iss] ?? {}) };
+  bucket[u] = t;
+  tokensByIssuer[iss] = bucket;
+
+  writeOfflineTokensStoreBestEffort({
+    updatedAt: new Date().toISOString(),
+    tokensByIssuer,
+    // Keep legacy field as a best-effort compatibility mirror.
+    tokens: { ...(cur.tokens ?? {}), [u]: t },
+  });
+};
 
 const readPremiumTokenObjectBestEffort = (): any | null => {
   try {
@@ -482,6 +725,187 @@ const postJson = async (
 
     req.write(body);
     req.end();
+  });
+};
+
+const postJsonFetch = async (opts: {
+  url: string;
+  payload: unknown;
+  headers: Record<string, string>;
+  timeoutMs: number;
+}): Promise<{ status: number; bodyText: string }> => {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), Math.max(250, opts.timeoutMs));
+  try {
+    const body = JSON.stringify(opts.payload ?? {});
+    const res = await fetch(opts.url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...opts.headers,
+      },
+      body,
+      signal: ctrl.signal,
+    });
+    const text = await res.text().catch(() => "");
+    return { status: res.status, bodyText: text };
+  } finally {
+    try {
+      clearTimeout(timer);
+    } catch {
+      // ignore
+    }
+  }
+};
+
+const extractOfflineTokenFromResponse = (uuid: string, bodyText: string): string | null => {
+  const u = String(uuid ?? "").trim().toLowerCase();
+  if (!u) return null;
+  let json: any = null;
+  try {
+    json = JSON.parse(bodyText);
+  } catch {
+    json = null;
+  }
+  const map = json && typeof json === "object" ? (json as any).offlineTokens : null;
+  if (!map || typeof map !== "object") return null;
+  const tok = (map as any)[u] ?? (map as any)[uuid] ?? null;
+  return typeof tok === "string" && tok.trim() ? tok.trim() : null;
+};
+
+const extractOfflineTokenFromResponseField = (
+  uuid: string,
+  bodyText: string,
+  field: string,
+): string | null => {
+  const u = String(uuid ?? "").trim().toLowerCase();
+  if (!u) return null;
+  let json: any = null;
+  try {
+    json = JSON.parse(bodyText);
+  } catch {
+    json = null;
+  }
+  const map = json && typeof json === "object" ? (json as any)[field] : null;
+  if (!map || typeof map !== "object") return null;
+  const tok = (map as any)[u] ?? (map as any)[uuid] ?? null;
+  return typeof tok === "string" && tok.trim() ? tok.trim() : null;
+};
+
+export const refreshOfflineToken = async (opts: {
+  accountType: "premium" | "nopremium";
+  username: string;
+  uuid: string;
+  issuer?: string | null;
+}): Promise<string> => {
+  const timeoutMs = 8_000;
+  const uuid = String(opts.uuid ?? "").trim().toLowerCase();
+  const username = String(opts.username ?? "").trim();
+  if (!uuid) throw new Error("Missing uuid");
+  if (!username && opts.accountType !== "premium") throw new Error("Missing username");
+
+  if (opts.accountType === "premium") {
+    const accessToken =
+      (await refreshPremiumAccessTokenIfNeeded()) ?? readPremiumAccessTokenBestEffort();
+    if (!accessToken) throw new Error("Premium login required (missing access token)");
+
+    const url = `${OFFICIAL_SESSIONS_BASE}/game-session/offline`;
+    const reqHeaders = {
+      ...officialLauncherHeaders(accessToken),
+    };
+
+    logPremiumHttp("info", "Premium HTTP game-session/offline", {
+      req: { method: "POST", url, headers: redactAuth(reqHeaders) },
+    });
+
+    const { status, bodyText } = await postJsonFetch({
+      url,
+      payload: { uuid },
+      headers: reqHeaders,
+      timeoutMs,
+    });
+
+    if (status !== 200) {
+      logPremiumHttp("warn", "Premium HTTP game-session/offline response", {
+        req: { method: "POST", url, headers: redactAuth(reqHeaders) },
+        res: { status, body: snippet(bodyText, 1200) },
+      });
+      throw new Error(`game-session/offline failed (HTTP ${status})`);
+    }
+
+    const tok = extractOfflineTokenFromResponse(uuid, bodyText);
+    if (!tok) {
+      logPremiumHttp("warn", "Premium HTTP game-session/offline missing token", {
+        res: { status, body: snippet(bodyText, 1200) },
+      });
+      throw new Error("game-session/offline returned missing offline token");
+    }
+    storeOfflineTokenBestEffort(uuid, OFFICIAL_ISSUER, tok);
+    return tok;
+  }
+
+  // No-premium (Butter sessions)
+  const tokens = await fetchAuthTokens(username, uuid);
+  const url = `${BUTTER_SESSIONS_BASE}/game-session/offline`;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${tokens.identityToken}`,
+  };
+
+  const { status, bodyText } = await postJsonFetch({
+    url,
+    payload: { uuid },
+    headers,
+    timeoutMs,
+  });
+
+  if (status !== 200) {
+    const sn = snippet(bodyText, 800);
+    throw new Error(`Butter game-session/offline failed (HTTP ${status})${sn ? `: ${sn}` : ""}`);
+  }
+
+  // No-premium endpoint can return multiple variants.
+  const butterToken = extractOfflineTokenFromResponse(uuid, bodyText);
+  const officialIssuerToken = extractOfflineTokenFromResponseField(
+    uuid,
+    bodyText,
+    "offlineTokensOfficialIssuer",
+  );
+
+  if (butterToken) storeOfflineTokenBestEffort(uuid, "https://sessions.butter.lat", butterToken);
+  if (officialIssuerToken) storeOfflineTokenBestEffort(uuid, OFFICIAL_ISSUER, officialIssuerToken);
+
+  const wantIssuer = String(opts.issuer ?? "").trim();
+  if (wantIssuer === OFFICIAL_ISSUER) {
+    if (officialIssuerToken) return officialIssuerToken;
+    throw new Error("Butter game-session/offline missing official-issuer offline token");
+  }
+
+  // Default to butter issuer.
+  if (butterToken) return butterToken;
+  throw new Error("Butter game-session/offline returned missing offline token");
+};
+
+export const ensureOfflineToken = async (opts: {
+  accountType: "premium" | "nopremium";
+  username: string;
+  uuid: string;
+  issuer?: string | null;
+  forceRefresh?: boolean;
+}): Promise<string> => {
+  const uuid = String(opts.uuid ?? "").trim().toLowerCase();
+  if (!uuid) throw new Error("Missing uuid");
+
+  if (!opts.forceRefresh) {
+    const cached = readStoredOfflineTokenBestEffort(uuid, opts.issuer ?? null);
+    if (cached) return cached;
+  }
+
+  return await refreshOfflineToken({
+    accountType: opts.accountType,
+    username: opts.username,
+    uuid,
+    issuer: opts.issuer ?? null,
   });
 };
 

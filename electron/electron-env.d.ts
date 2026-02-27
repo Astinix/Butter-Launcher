@@ -92,6 +92,25 @@ interface Window {
     startupSoundSet: (enabled: boolean) => Promise<{ ok: boolean; settingsPath: string; error: string | null }>;
     startupSoundMarkFirstRunPlayed: () => Promise<{ ok: boolean; settingsPath: string; error: string | null }>;
 
+    offlineTokenRefresh: (payload: {
+      username: string;
+      accountType?: string | null;
+      customUUID?: string | null;
+    }) => Promise<
+      | { ok: true; uuid: string }
+      | { ok: false; error: string }
+    >;
+
+    butterJwksRefresh: () => Promise<
+      | { ok: true; keys: number }
+      | { ok: false; error: string }
+    >;
+
+    officialJwksRefresh: () => Promise<
+      | { ok: true; keys: number }
+      | { ok: false; error: string }
+    >;
+
     premiumStatus: () => Promise<
       | { ok: true; loggedIn: boolean; profile: { displayName: string; sub?: string } | null; error: null }
       | { ok: false; loggedIn: false; profile: null; error: string }

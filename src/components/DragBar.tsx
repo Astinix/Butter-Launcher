@@ -19,7 +19,7 @@ const DragBar: React.FC<{
   };
 
   const handleClose = () => {
-    window.ipcRenderer.send("close-window");
+    window.ipcRenderer.send("app:request-close");
   };
 
   const squareBtn =
@@ -34,6 +34,7 @@ const DragBar: React.FC<{
           px-3 select-none
           bg-transparent
           ml-3
+          relative z-[5000]
         "
       >
         <div className="flex items-center gap-2 text-sm text-gray-300">

@@ -156,6 +156,35 @@ type PwrDownloadState = {
 
 const pwrDownloadsInFlight = new Map<string, PwrDownloadState>();
 
+export const hasBuildDownloadsInFlight = (): boolean => {
+  return pwrDownloadsInFlight.size > 0;
+};
+
+export const cancelAllBuildDownloads = (): number => {
+  const entries = Array.from(pwrDownloadsInFlight.values());
+  if (!entries.length) return 0;
+
+  // Clear first so any concurrent checks see "no downloads" after we decide to cancel.
+  pwrDownloadsInFlight.clear();
+
+  for (const st of entries) {
+    try {
+      st.controller.abort();
+    } catch {
+      // ignore
+    }
+
+    // best effort cleanup of partial file
+    try {
+      if (fs.existsSync(st.tempPath)) fs.unlinkSync(st.tempPath);
+    } catch {
+      // ignore
+    }
+  }
+
+  return entries.length;
+};
+
 const installKey = (gameDir: string, version: GameVersion) =>
   `${gameDir}::${version.type}::${version.build_index}`;
 

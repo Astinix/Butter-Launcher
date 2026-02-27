@@ -197,6 +197,7 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
     hasBuild1Installed,
   } = useGameContext();
   const { username } = useUserContext();
+  const [closeDownloadConfirmOpen, setCloseDownloadConfirmOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
   const [serversOpen, setServersOpen] = useState(false);
@@ -210,6 +211,24 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const [friendsMenuOpenTo, setFriendsMenuOpenTo] = useState<"friends" | "globalChat">("friends");
   const [friendsMenuOpenNonce, setFriendsMenuOpenNonce] = useState(0);
   const [friendsHasUnread, setFriendsHasUnread] = useState(false);
+
+  useEffect(() => {
+    const ipc = (window as any)?.ipcRenderer;
+    if (!ipc || typeof ipc.on !== "function") return;
+
+    const onConfirmCloseDownload = () => {
+      setCloseDownloadConfirmOpen(true);
+    };
+
+    ipc.on("app:confirm-close-download", onConfirmCloseDownload);
+    return () => {
+      try {
+        ipc.removeListener("app:confirm-close-download", onConfirmCloseDownload);
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   const computeFriendsHasUnread = () => {
     try {
@@ -1379,6 +1398,34 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
 
                     {hostServerAdvancedOpen ? (
                       <div className="mt-3 space-y-2">
+                        <button
+                          type="button"
+                          className={cn(
+                            "w-full px-3 py-2 rounded-lg border border-[#2a3146]",
+                            "bg-transparent hover:bg-white/5 text-gray-200 transition text-sm font-semibold",
+                          )}
+                          onClick={async () => {
+                            if (!isSelectedBuildInstalled()) {
+                              showSelectedBuildNotInstalledError();
+                              return;
+                            }
+
+                            if (!gameDir || !selected) return;
+                            try {
+                              await window.ipcRenderer.invoke(
+                                "host-server:open-current-folder",
+                                gameDir,
+                                selected,
+                              );
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                          title={t("hostServerModal.panel.advanced.openServerFolder")}
+                        >
+                          {t("hostServerModal.panel.advanced.openServerFolder")}
+                        </button>
+
                         {/* RAM */}
                         <div className="flex items-center gap-2 min-w-0">
                           <input
@@ -2002,6 +2049,30 @@ const Launcher: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
       <MatchaTermsModal
         open={matchaTermsOpen}
         onClose={() => setMatchaTermsOpen(false)}
+      />
+
+      <ConfirmModal
+        open={closeDownloadConfirmOpen}
+        title={t("common.close")}
+        message={t("common.closeDownloadWarning")}
+        cancelText={t("common.cancel")}
+        confirmText={t("common.confirm")}
+        onCancel={() => {
+          setCloseDownloadConfirmOpen(false);
+          try {
+            window.ipcRenderer.send("app:close-download:cancel");
+          } catch {
+            // ignore
+          }
+        }}
+        onConfirm={() => {
+          setCloseDownloadConfirmOpen(false);
+          try {
+            window.ipcRenderer.send("app:cancel-downloads-and-quit");
+          } catch {
+            // ignore
+          }
+        }}
       />
 
       <ConfirmModal

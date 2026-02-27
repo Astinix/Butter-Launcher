@@ -129,6 +129,16 @@ contextBridge.exposeInMainWorld("config", {
   startupSoundMarkFirstRunPlayed: () =>
     ipcRenderer.invoke("launcher-settings:startup-sound:first-run-played"),
 
+  offlineTokenRefresh: (payload: {
+    username: string;
+    accountType?: string | null;
+    customUUID?: string | null;
+  }) => ipcRenderer.invoke("offline-token:refresh", payload),
+
+  butterJwksRefresh: () => ipcRenderer.invoke("butter-jwks:refresh"),
+
+  officialJwksRefresh: () => ipcRenderer.invoke("official-jwks:refresh"),
+
   // Premium login (OAuth)
   premiumStatus: () => ipcRenderer.invoke("premium:status"),
   premiumOauthStart: () => ipcRenderer.invoke("premium:oauth:start"),

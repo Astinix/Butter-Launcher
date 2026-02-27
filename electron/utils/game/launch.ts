@@ -11,6 +11,9 @@ import {
   fetchAuthTokens,
   fetchPremiumLaunchAuth,
   fetchPremiumLauncherPrimaryProfile,
+  ensureButterJwks,
+  ensureOfficialJwks,
+  ensureOfflineToken,
 } from "./auth";
 import { resolveExistingInstallDir } from "./paths";
 import { mapErrorToCode } from "../errorCodes";
@@ -220,6 +223,60 @@ export const launchGame = async (
     args.push("--auth-mode", "offline");
   }
 
+  let offlineTokenToInject: string | null = null;
+  if (!useAuthenticated) {
+    try {
+      const wantIssuer =
+        accountType === "premium"
+          ? "https://sessions.hytale.com"
+          : patchEnabled
+            ? "https://sessions.butter.lat"
+            : "https://sessions.hytale.com";
+
+      // Critical for no-premium: pre-seed the game's JWKS cache with Butter's key.
+      // Without this, unpatched clients will fetch the official JWKS and reject our signatures.
+      if (accountType !== "premium") {
+        try {
+          const jwks = await ensureButterJwks({ forceRefresh: false });
+          if (jwks && Array.isArray((jwks as any).keys) && (jwks as any).keys.length) {
+            const jwksPath = join(userDir, ".jwks.json");
+            fs.writeFileSync(jwksPath, JSON.stringify(jwks), "utf8");
+          }
+        } catch {
+          // ignore (best-effort)
+        }
+      } else {
+        // Premium best-effort: seed official JWKS cache so offline can work without network.
+        try {
+          const jwks = await ensureOfficialJwks({ forceRefresh: false });
+          if (jwks && Array.isArray((jwks as any).keys) && (jwks as any).keys.length) {
+            const jwksPath = join(userDir, ".jwks.json");
+            fs.writeFileSync(jwksPath, JSON.stringify(jwks), "utf8");
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Ensure we have an offline token cached; this allows true offline launches.
+      offlineTokenToInject = await ensureOfflineToken({
+        accountType: accountType === "premium" ? "premium" : "nopremium",
+        username: finalUsername,
+        uuid: finalUuid,
+        issuer: wantIssuer,
+        forceRefresh: false,
+      });
+    } catch (e) {
+      // If we can't obtain an offline token, launching in offline mode will likely fail.
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.error("Offline token missing/refresh failed", msg);
+      win.webContents.send("launch-error", {
+        code: mapErrorToCode(new Error(msg), { area: "auth" }),
+      });
+      return;
+    }
+  }
+
   logger.info("Launch arguments:", args);
 
   const appDir = resolveExistingInstallDir(baseDir, version);
@@ -228,6 +285,11 @@ export const launchGame = async (
     logger.info(`Spawning client (attempt ${attempt + 1})...`);
     try {
       const env = { ...process.env };
+
+      // Offline auth token injection
+      if (!useAuthenticated && offlineTokenToInject) {
+        env.HYTALE_OFFLINE_TOKEN = offlineTokenToInject;
+      }
 
       // Linux specific environment variables
       if (process.platform === "linux") {

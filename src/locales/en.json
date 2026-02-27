@@ -12,6 +12,8 @@
     "search": "Search",
     "folder": "Folder",
     "sortBy": "Sort by",
+    "ascending": "Ascending",
+    "descending": "Descending",
     "open": "Open",
     "loading": "Loading...",
     "refresh": "Refresh",
@@ -29,7 +31,8 @@
     "disabled": "Disabled",
     "clear": "Clear",
     "send": "Send",
-    "copied": "Copied"
+    "copied": "Copied",
+    "closeDownloadWarning": "Closing the launcher will cancel the current download. Are you sure you want to close it?"
   },
   "supportTicket": {
     "devAssistSoon": "A developer will assist you shortly.",
@@ -573,6 +576,7 @@
       },
       "advanced": {
         "toggle": "Advanced Options",
+        "openServerFolder": "Open the current server folder",
         "ram": "RAM",
         "min": "Min",
         "max": "Max",
@@ -684,6 +688,12 @@
     },
     "installed": {
       "counts": "{{downloaded}} downloaded • {{active}} active",
+      "sort": {
+        "connectedToLauncher": "Connected to launcher",
+        "installedManually": "Installed manually",
+        "alphabetical": "Alphabetical",
+        "needsUpdate": "Need updating"
+      },
       "enableAll": "Enable All",
       "disableAll": "Disable All",
       "openFolder": "Open Folder",
@@ -712,6 +722,14 @@
       "title": "Profiles",
       "namePlaceholder": "Profile name...",
       "noProfilesYet": "No profiles yet.",
+      "rename": {
+        "menu": "Rename",
+        "title": "Rename profile",
+        "hint": "Rename \"{{name}}\" to:",
+        "placeholder": "New profile name...",
+        "invalid": "Enter a profile name.",
+        "taken": "A profile with that name already exists."
+      },
       "selectedCount": "Selected: {{count}}",
       "currentlyEnabled": "Currently enabled",
       "currentlyDisabled": "Currently disabled",

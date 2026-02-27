@@ -12,6 +12,9 @@ const HostServerConsoleModal: React.FC<{
   const { t } = useTranslation();
   const [closing, setClosing] = useState(false);
   const [command, setCommand] = useState("");
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [historyDraft, setHistoryDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const renderedLines = useMemo(() => {
@@ -157,6 +160,13 @@ const HostServerConsoleModal: React.FC<{
 
   useEffect(() => {
     if (!open) return;
+    // When opening the modal, reset the navigation cursor but keep history.
+    setHistoryIndex(null);
+    setHistoryDraft("");
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     // Scroll to bottom when logs change.
     const el = scrollRef.current;
     if (!el) return;
@@ -225,12 +235,69 @@ const HostServerConsoleModal: React.FC<{
             const cmd = command.trim();
             if (!cmd) return;
             onCommand(cmd);
+
+            setCommandHistory((prev) => {
+              const next = prev.length && prev[prev.length - 1] === cmd ? prev : [...prev, cmd];
+              // Keep history bounded.
+              return next.length > 100 ? next.slice(next.length - 100) : next;
+            });
+
             setCommand("");
+            setHistoryIndex(null);
+            setHistoryDraft("");
           }}
         >
           <input
             value={command}
-            onChange={(e) => setCommand(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              // If user types while navigating history, exit history mode.
+              if (historyIndex != null) {
+                setHistoryIndex(null);
+                setHistoryDraft(v);
+              }
+              setCommand(v);
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+              if (!commandHistory.length) return;
+
+              // Prevent cursor movement / parent handlers.
+              e.preventDefault();
+              e.stopPropagation();
+
+              if (e.key === "ArrowUp") {
+                setHistoryIndex((prev) => {
+                  // Enter history navigation from the current draft.
+                  if (prev == null) {
+                    setHistoryDraft(command);
+                    const nextIdx = commandHistory.length - 1;
+                    setCommand(commandHistory[nextIdx] ?? "");
+                    return nextIdx;
+                  }
+
+                  const nextIdx = Math.max(0, prev - 1);
+                  setCommand(commandHistory[nextIdx] ?? "");
+                  return nextIdx;
+                });
+                return;
+              }
+
+              // ArrowDown
+              setHistoryIndex((prev) => {
+                if (prev == null) return null;
+
+                const nextIdx = prev + 1;
+                if (nextIdx >= commandHistory.length) {
+                  // Past the newest entry: restore draft (often empty).
+                  setCommand(historyDraft);
+                  return null;
+                }
+
+                setCommand(commandHistory[nextIdx] ?? "");
+                return nextIdx;
+              });
+            }}
             placeholder={t("hostServerModal.console.commandPlaceholder")}
             className="flex-1 px-3 py-2 rounded-lg bg-[#141824]/80 border border-[#2a3146] text-white text-sm outline-none focus:border-blue-400/60"
           />
